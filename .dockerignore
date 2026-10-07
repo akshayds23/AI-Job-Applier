@@ -1,0 +1,9 @@
+.env
+.venv
+.venv312
+tools
+data
+sessions
+frontend
+**/__pycache__
+**/*.pyc

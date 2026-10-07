@@ -1,0 +1,8 @@
+# Running AutoApplier on your own computer: adds the browser automation used by
+# "Auto-fill application" (it opens a visible browser window, so it can't run on a server).
+#   pip install -r requirements-desktop.txt
+#   python -m playwright install chromium
+-r requirements.txt
+playwright==1.62.0
+pytest==8.3.2
+pytest-asyncio==0.23.8

@@ -1,0 +1,30 @@
+# Render Blueprint for the AutoApplier backend (FastAPI in Docker).
+# Render dashboard -> New -> Blueprint -> pick this repository.
+# The frontend is deployed separately on Vercel (root directory: frontend).
+services:
+  - type: web
+    name: autoapplier-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    # Starter or above: free instances sleep after 15 minutes, which stops the
+    # hourly inbox sync and scheduled job searches.
+    plan: starter
+    healthCheckPath: /healthz
+    # In-memory state (key cooldowns, progress) assumes a single instance.
+    numInstances: 1
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        sync: false            # paste your Neon connection string
+      - key: NEXTAUTH_SECRET
+        generateValue: true    # never change it later: stored API keys are encrypted with it
+      - key: ALLOWED_ORIGINS
+        sync: false            # e.g. https://autoapplier.vercel.app
+      - key: ALLOWED_ORIGIN_REGEX
+        value: https://.*\.vercel\.app
+      - key: ASSISTED_APPLY_ENABLED
+        value: "false"

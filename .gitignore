@@ -1,0 +1,32 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local data (database, uploads, generated resumes, browser sessions)
+data/
+sessions/
+backend/data/
+
+# Python
+.venv/
+.venv312/
+__pycache__/
+*.pyc
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Local tools (Tectonic binary is downloaded; Docker installs its own)
+tools/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Vercel build outputs (created by backend/scripts/vercel_build.sh)
+backend/bin/
+backend/.tectonic-cache/
