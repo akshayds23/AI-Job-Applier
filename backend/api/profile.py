@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from database.database import get_db
 from database.models import User, UserProfile, Skill, Experience, Project, Education, MasterResume
 from api.auth import get_current_user
 from services.resume_parser import ResumeParser
+from services.resume_import import apply_parsed_resume, latest_master, parsed_with_ai
 from services.profile_scraper import ProfileScraper
 from pydantic import BaseModel
 from typing import List, Optional
@@ -220,90 +221,43 @@ async def upload_resume(
     )
     db.add(master)
 
-    # Update User Profile
-    contact = parsed.get("contact", {})
-    prof_res = await db.execute(select(UserProfile).where(UserProfile.user_id == user.id))
-    profile = prof_res.scalar_one_or_none()
-    if not profile:
-        profile = UserProfile(user_id=user.id)
-        db.add(profile)
-
-    if contact.get("name"):
-        user.name = contact.get("name")
-    if contact.get("phone"):
-        profile.phone = contact.get("phone")
-    if contact.get("location"):
-        profile.location = contact.get("location")
-    if contact.get("linkedin_url"):
-        profile.linkedin_url = contact.get("linkedin_url")
-    if contact.get("github_url"):
-        profile.github_url = contact.get("github_url")
-    if parsed.get("professional_summary"):
-        profile.professional_summary = parsed.get("professional_summary")
-    if parsed.get("experience_years"):
-        profile.experience_years = parsed.get("experience_years")
-    if parsed.get("headline"):
-        profile.headline = parsed["headline"]
-    if contact.get("email"):
-        profile.contact_email = contact["email"]
-    profile.achievements = parsed.get("achievements") or []
-    profile.title_suggestions = None
-    profile.certifications = parsed.get("certifications") or []
-
-    profile.is_onboarded = True
-
-    # Clear old skills and insert parsed skills
-    await db.execute(delete(Skill).where(Skill.user_id == user.id))
-    seen_skills: set[str] = set()
-    for s in parsed.get("skills", []):
-        skill_name = (s.get("name") if isinstance(s, dict) else str(s) or "").strip()[:100]
-        # Skills are unique per user; "REST APIs" and "REST API" are the same skill.
-        key = skill_name.lower().rstrip("s")
-        if skill_name and key not in seen_skills:
-            seen_skills.add(key)
-            db.add(Skill(user_id=user.id, name=skill_name, category=s.get("category", "general") if isinstance(s, dict) else "general"))
-
-    # Clear old experiences and insert parsed experiences
-    await db.execute(delete(Experience).where(Experience.user_id == user.id))
-    for order, exp in enumerate(parsed.get("experiences", [])):
-        db.add(Experience(
-            display_order=order,
-            user_id=user.id,
-            company=exp.get("company", "Company"),
-            title=exp.get("title", "Role"),
-            location=exp.get("location", ""),
-            start_date=exp.get("start_date", ""),
-            end_date=exp.get("end_date", "Present"),
-            bullets=exp.get("bullets", []),
-            technologies=exp.get("technologies", [])
-        ))
-
-    # Clear old projects and insert parsed projects
-    await db.execute(delete(Project).where(Project.user_id == user.id))
-    for proj in parsed.get("projects", []):
-        db.add(Project(
-            user_id=user.id,
-            name=proj.get("name", "Project"),
-            description=proj.get("description", ""),
-            technologies=proj.get("technologies", []),
-            url=proj.get("url", "")
-        ))
-
-    await db.execute(delete(Education).where(Education.user_id == user.id))
-    for order, edu in enumerate(parsed.get("education", [])):
-        db.add(Education(
-            user_id=user.id,
-            institution=edu.get("institution") or "Institution",
-            degree=edu.get("degree") or "Degree",
-            field=edu.get("field") or None,
-            start_date=edu.get("start_date") or None,
-            end_date=edu.get("end_date") or None,
-            gpa=edu.get("gpa") or None,
-            display_order=order,
-        ))
+    await apply_parsed_resume(db, user, parsed)
 
     await db.commit()
-    return {"status": "success", "parsed_summary": parsed.get("professional_summary", "")}
+    return {
+        "status": "success",
+        "parsed_summary": parsed.get("professional_summary", ""),
+        "parsed_with_ai": parsed.get("source") == "llm",
+        "counts": {k: len(parsed.get(k) or []) for k in ("experiences", "projects", "education")},
+    }
+
+
+@router.get("/resume-status")
+async def resume_status(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Whether the uploaded resume was read with AI (regex-only misses work history)."""
+    from services.jobs import active_job
+
+    master = await latest_master(db, user.id)
+    job = await active_job(user.id, "resume_import")
+    return {
+        "has_resume": master is not None,
+        "file_name": master.file_name if master else None,
+        "parsed_with_ai": parsed_with_ai(master),
+        "importing": job is not None,
+        "message": job.message if job else None,
+    }
+
+
+@router.post("/reimport-resume", status_code=202)
+async def reimport_resume(background_tasks: BackgroundTasks, user: User = Depends(get_current_user)):
+    """Re-read the uploaded resume with AI (runs as a background job; waits out rate limits)."""
+    from services.jobs import kick, start_resume_import
+
+    job = await start_resume_import(user.id, force=True)
+    if job is None:
+        raise HTTPException(status_code=400, detail="Upload your resume first")
+    kick(background_tasks, user.id)
+    return {"status": "queued"}
 
 @router.post("/auto-import")
 async def auto_import_from_links(

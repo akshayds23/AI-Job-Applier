@@ -138,7 +138,9 @@ class ResumeParser:
     # -- parsing -----------------------------------------------------------
 
     async def parse(self, file_path: str | Path) -> dict[str, Any]:
-        raw_text = self.extract_raw_text(file_path)
+        return await self.parse_text(self.extract_raw_text(file_path))
+
+    async def parse_text(self, raw_text: str) -> dict[str, Any]:
         baseline = self.parse_heuristic(raw_text)
 
         if not self.llm.is_available:

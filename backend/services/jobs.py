@@ -196,9 +196,12 @@ async def _run_step(job: BackgroundJob, deadline: float) -> None:
                 elif result.status == "continue":
                     status, run_after = "queued", time.time()
                 else:  # defer: every key rate-limited
-                    status, run_after = _defer(payload, keyring.max_wait_seconds, result.run_after or time.time() + 30)
+                    until = result.run_after or time.time() + 30
+                    max_wait = NO_FALLBACK_WAIT_SECONDS if job.kind in _NO_FALLBACK else keyring.max_wait_seconds
+                    status, run_after = _defer(payload, max_wait, until)
                     if status == "queued":
-                        message = "Waited past your limit - continuing with the non-AI fallback"
+                        message = _fallback_message(payload, keyring, until, max_wait)
+                        logger.warning("Job %s (%s): %s", job.id, job.kind, message)
         except DeferJob as exc:  # raised outside a handler's own handling
             status, run_after = _defer(payload, 900, exc.until)
             message = f"Waiting for your API rate limit ({exc.reason})"
@@ -230,6 +233,30 @@ def _defer(payload: dict[str, Any], max_wait_seconds: float, until: float) -> tu
         return "queued", time.time()
     return "waiting", until
 
+
+def _fallback_message(payload: dict[str, Any], keyring, until: float, max_wait: float) -> str:
+    """Say *why* AI is being skipped - a daily quota reset hours away looks very different from a short wait."""
+    waited = time.time() - payload.get("first_wait_at", time.time())
+    reasons = sorted({k.cooldown_reason for k in keyring.keys if k.usable and k.cooldown_reason})
+    why = f" ({', '.join(reasons)})" if reasons else ""
+    if waited < 60:
+        return (f"Your API keys are rate-limited for {_human(until - time.time())} more{why} - longer than your "
+                f"{_human(max_wait)} wait limit, so continuing without AI. Add another key or raise the limit in Settings.")
+    return f"Waited {_human(waited)} for your API keys{why} - continuing without AI"
+
+
+def _human(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 90:
+        return f"{seconds}s"
+    if seconds < 5400:
+        return f"{round(seconds / 60)} min"
+    return f"{seconds // 3600}h {seconds % 3600 // 60:02d}m"
+
+
+# Jobs that are useless without AI: they wait for the key however long it takes.
+_NO_FALLBACK = {"resume_import"}
+NO_FALLBACK_WAIT_SECONDS = 36 * 3600
 
 _FAILURE_HOOKS: dict[str, Callable[[BackgroundJob, str], Awaitable[None]]] = {}
 
@@ -280,10 +307,19 @@ _FAILURE_HOOKS["discovery"] = _discovery_failed
 async def _prepare_step(job: BackgroundJob, payload: dict[str, Any], deadline: float) -> StepResult:
     from services.tailoring import retailor_application
 
+    from services.resume_import import reimport_with_ai
+
     app_id = payload["application_id"]
     await _set_prepare_state(app_id, {"state": "preparing", "message": "Tailoring your resume and writing the cover letter..."})
     try:
         async with AsyncSessionLocal() as db:
+            if not payload.get("resume_checked"):
+                # A resume uploaded before any AI key was added has no parsed work history;
+                # read it properly first, or the tailored resume would be summary + skills only.
+                imported = await reimport_with_ai(db, job.user_id)
+                payload["resume_checked"] = True
+                if imported["status"] == "imported":
+                    logger.info("Re-imported resume before preparing %s", app_id)
             app = await db.get(Application, app_id)
             if app is None:
                 return StepResult("done", payload, "Application no longer exists")
@@ -317,6 +353,26 @@ async def _set_prepare_state(app_id: str | None, state: dict[str, Any]) -> None:
         await db.commit()
 
 
+@handler("resume_import")
+async def _resume_import_step(job: BackgroundJob, payload: dict[str, Any], deadline: float) -> StepResult:
+    from services.resume_import import reimport_with_ai
+    from utils.llm_client import get_llm_client
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await reimport_with_ai(db, job.user_id, get_llm_client(), force=bool(payload.get("force")))
+    except DeferJob as exc:
+        wait = max(0, round(exc.until - time.time()))
+        return StepResult("defer", payload, f"Waiting {_human(wait)} for your API rate limit ({exc.reason})", exc.until)
+    messages = {
+        "imported": "Resume re-read with AI: {experiences} roles, {projects} projects, {education} education entries",
+        "already": "Your resume was already read with AI",
+        "no_resume": "Upload your resume first",
+        "no_ai": "Could not reach your AI keys - check Settings -> AI keys and try again",
+    }
+    return StepResult("done", payload, messages[result["status"]].format(**result))
+
+
 @handler("inbox_sync")
 async def _inbox_step(job: BackgroundJob, payload: dict[str, Any], deadline: float) -> StepResult:
     from services.mailer import sync_inbox
@@ -346,6 +402,17 @@ async def start_prepare(user_id: str, application_id: str) -> BackgroundJob:
                         dedupe_key=application_id)
     await _set_prepare_state(application_id, {"state": "preparing", "message": "Queued - starting shortly..."})
     return job
+
+
+async def start_resume_import(user_id: str, force: bool = False) -> BackgroundJob | None:
+    """Queue an AI re-read of the uploaded resume (only if it still needs one, unless forced)."""
+    from services.resume_import import latest_master, parsed_with_ai
+
+    async with AsyncSessionLocal() as db:
+        master = await latest_master(db, user_id)
+    if master is None or (parsed_with_ai(master) and not force):
+        return None
+    return await enqueue(user_id, "resume_import", {"force": force}, "Reading your resume with AI", dedupe_key="resume")
 
 
 def kick(background_tasks=None, user_id: str | None = None, budget: float = STEP_BUDGET_SECONDS) -> None:

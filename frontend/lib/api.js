@@ -123,6 +123,8 @@ export const api = {
       body: formData
     }).then(res => res.json());
   },
+  getResumeStatus: () => fetchApi("/profile/resume-status"),
+  reimportResume: () => fetchApi("/profile/reimport-resume", { method: "POST" }),
   autoImportLinks: (data) => fetchApi("/profile/auto-import", { method: "POST", body: JSON.stringify(data) }),
   getMatchedJobs: (minScore = 0, includeSkipped = false) => fetchApi(`/jobs/matched?min_score=${minScore}&include_skipped=${includeSkipped}`),
   triggerLiveScrape: () => fetchApi("/jobs/scrape", { method: "POST" }),

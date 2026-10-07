@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   CheckCircle2, Clock, FileText, KeyRound, Mail, Plus, Power, RefreshCw, Search, Trash2, XCircle,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, pumpJobs } from "@/lib/api";
 import { Badge, Button, Card, Field, Notice, PageHeader } from "@/components/ui";
 import TitleSuggestions from "@/components/TitleSuggestions";
 
@@ -248,6 +248,47 @@ function SearchCard() {
 
 /* ---------------------------------------------------------- Resume details */
 
+function ResumeImportNotice() {
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState(null);
+
+  const refresh = useCallback(() => api.getResumeStatus().then(setStatus).catch(() => {}), []);
+  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!status?.importing) return;
+    const timer = setInterval(() => { pumpJobs(); refresh(); }, 4000);
+    return () => clearInterval(timer);
+  }, [status?.importing, refresh]);
+
+  const reimport = async () => {
+    setError(null);
+    try {
+      await api.reimportResume();
+      setStatus(s => ({ ...s, importing: true, message: "Reading your resume with AI" }));
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  if (!status?.has_resume) return null;
+  if (status.importing) {
+    return <Notice style={{ marginBottom: 14 }}>{status.message || "Reading your resume with AI"}...</Notice>;
+  }
+  if (!status.parsed_with_ai) {
+    return (
+      <Notice tone="warning" style={{ marginBottom: 14 }}>
+        <div>Your resume ({status.file_name}) was read without AI, so your work history, projects and education
+          were not imported and generated resumes will be missing them.</div>
+        <div className="row" style={{ marginTop: 10 }}>
+          <Button variant="primary" icon={RefreshCw} onClick={reimport}>Read resume with AI</Button>
+          {error && <span className="small" style={{ color: "var(--danger)" }}>{error}</span>}
+        </div>
+      </Notice>
+    );
+  }
+  return null;
+}
+
 function ResumeCard() {
   const [form, setForm] = useState(null);
   const [saved, setSaved] = useState(null);
@@ -280,6 +321,7 @@ function ResumeCard() {
 
   return (
     <Card title="Resume details" icon={FileText} style={{ marginBottom: 20 }}>
+      <ResumeImportNotice />
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <Field label="Headline under your name" hint="Each job gets a tailored version.">
           <input className="input" value={form.headline} onChange={e => setForm({ ...form, headline: e.target.value })} placeholder="AI & Robotics | Program Leadership" />

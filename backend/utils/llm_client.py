@@ -172,7 +172,7 @@ class LLMClient:
                 if policy is not None:
                     # Background job: never park a server process on a long wait.
                     if policy.allow_fallback:
-                        raise LLMUnavailable("API keys still rate-limited after your wait limit")
+                        raise LLMUnavailable("API keys rate-limited beyond your wait limit")
                     if wait > policy.inline_wait_seconds:
                         reasons = {k.cooldown_reason for k in keyring.keys if k.usable and k.cooldown_reason}
                         raise DeferJob(time.time() + wait, ", ".join(sorted(reasons)) or "rate limited")

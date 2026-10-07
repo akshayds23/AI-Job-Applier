@@ -53,7 +53,11 @@ export default function Onboarding() {
   });
 
   const addKey = () => run(async () => {
-    await api.addAiKey({ provider: key.provider, api_key: key.api_key });
+    const res = await api.addAiKey({ provider: key.provider, api_key: key.api_key });
+    if (res?.resume_reimport) {
+      // The resume was uploaded before this key existed; the backend is re-reading it with AI now.
+      setNotice({ tone: "success", text: "Key added. Reading your resume with AI in the background to import your work history." });
+    }
     setStep(2);
   });
 

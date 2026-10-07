@@ -1,7 +1,7 @@
 """Bring-your-own-key management: each user stores and rotates their own LLM API keys."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,7 +78,7 @@ async def list_keys(user: User = Depends(get_current_user), db: AsyncSession = D
 
 
 @router.post("/", status_code=201)
-async def add_key(data: KeyIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def add_key(data: KeyIn, background_tasks: BackgroundTasks, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     provider = data.provider.strip().lower()
     secret = data.api_key.strip()
     if provider not in PROVIDERS:
@@ -106,7 +106,14 @@ async def add_key(data: KeyIn, user: User = Depends(get_current_user), db: Async
     await db.commit()
     await db.refresh(row)
     invalidate_keyring(user.id)
-    return {**_key_dict(row, None), "test": test}
+
+    # A resume uploaded before the first key was parsed without AI (no work history) - read it again now.
+    from services.jobs import kick, start_resume_import
+
+    reimport = await start_resume_import(user.id)
+    if reimport is not None:
+        kick(background_tasks, user.id)
+    return {**_key_dict(row, None), "test": test, "resume_reimport": reimport is not None}
 
 
 @router.patch("/{key_id}")
