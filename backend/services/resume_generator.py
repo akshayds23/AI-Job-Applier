@@ -364,11 +364,15 @@ class ResumeGenerator:
             if not project.get("name"):
                 continue
             tech = [str(t) for t in (project.get("technologies") or [])][:5]
-            sentences = re.split(r"(?<=[.!?])\s+", str(project.get("description") or "").strip())
+            tech = [t for t in tech if t.lower() not in _NOT_TECH]
+            sentences = re.split(r"(?<=[.!?])\s+", clean_text(project.get("description") or ""))
             formatted_projects.append({
                 "name": " | ".join(p for p in (str(project["name"]).strip(), ", ".join(tech)) if p),
-                "bullets": [trim_to_sentence(s, 200) for s in sentences if len(s) > 15][:3],
+                "bullets": [_clean_bullet(trim_to_sentence(s, 200)) for s in sentences if len(s) > 15][:3],
             })
+        if sum(1 for p in formatted_projects if p["bullets"]) >= 2:
+            # A bare repo name says nothing to a recruiter once real projects are listed.
+            formatted_projects = [p for p in formatted_projects if p["bullets"]]
 
         formatted_education = []
         for edu in education[:MAX_EDUCATION]:
@@ -416,13 +420,15 @@ class ResumeGenerator:
         skill_categories: dict[str, str],
     ) -> list[tuple[str, list[str]]]:
         if skill_groups:
-            return [(str(name), [str(s) for s in members]) for name, members in skill_groups.items() if members]
-        buckets: dict[str, list[str]] = {}
-        for skill in skills_order:
-            category = (skill_categories.get(skill) or "general").lower()
-            title = _CATEGORY_TITLES.get(category, category.title())
-            buckets.setdefault(title, []).append(skill)
-        return list(buckets.items())
+            groups = [(str(name), [str(s) for s in members]) for name, members in skill_groups.items() if members]
+        else:
+            buckets: dict[str, list[str]] = {}
+            for skill in skills_order:
+                category = (skill_categories.get(skill) or "general").lower()
+                title = _CATEGORY_TITLES.get(category, category.replace("-", " ").title())
+                buckets.setdefault(title, []).append(skill)
+            groups = list(buckets.items())
+        return _tidy_skill_groups(groups)
 
     # -- PDF -----------------------------------------------------------------
 
@@ -748,6 +754,8 @@ _TEX_UNICODE = {"→": r"$\rightarrow$", "–": "--", "—": "---", "₹": "Rs."
 
 def tex_escape(text: str) -> str:
     out = "".join(_TEX_SPECIALS.get(ch, ch) for ch in str(text or ""))
+    # Let long slash-joined runs ("CSV/XLSX/JSON/...") break instead of running into the margin.
+    out = out.replace("/", r"/\allowbreak{}")
     for source, target in _TEX_UNICODE.items():
         out = out.replace(source, target)
     return out
@@ -930,7 +938,44 @@ def _md_safe(text: str) -> str:
 
 
 def _clean_bullet(text: Any) -> str:
-    return clean_text(text).lstrip("-*•· ").strip()
+    text = clean_text(text).lstrip("-*•· ").strip()
+    # Descriptions cut off mid-sentence ("..., generates code to compute results,") end cleanly.
+    if text and text[-1] in ",;:":
+        text = text.rstrip(",;: ") + "."
+    return text
+
+
+# GitHub "languages" that are file formats, not skills.
+_NOT_TECH = {"jupyter notebook", "html", "css", "shell", "dockerfile", "makefile", "procfile"}
+# Internal category names that must never be printed as a heading.
+_INTERNAL_GROUPS = {"auto-imported", "auto imported", "general", "other", "misc", "miscellaneous", ""}
+
+
+def _tidy_skill_groups(groups: list[tuple[str, list[str]]]) -> list[tuple[str, list[str]]]:
+    """Fold internal labels and one-item groups into an "Other" line; drop repeats and file formats."""
+    seen: set[str] = set()
+    kept: list[tuple[str, list[str]]] = []
+    spill: list[str] = []
+    for name, members in groups:
+        unique = []
+        for skill in members:
+            skill = clean_text(skill)
+            key = skill.lower()
+            if skill and key not in seen and key not in _NOT_TECH:
+                seen.add(key)
+                unique.append(skill)
+        if not unique:
+            continue
+        if name.strip().lower() in _INTERNAL_GROUPS or len(unique) < 2:
+            spill.extend(unique)
+        else:
+            kept.append((name, unique))
+    if spill:
+        if kept and len(spill) < 2:
+            kept[-1] = (kept[-1][0], kept[-1][1] + spill)
+        else:
+            kept.append(("Other" if kept else "Skills", spill))
+    return kept
 
 
 def _strip_scheme(url: str) -> str:

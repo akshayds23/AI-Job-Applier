@@ -93,6 +93,9 @@ def clean_text(text: str) -> str:
     text = str(text or "")
     for source, target in _TYPOGRAPHY.items():
         text = text.replace(source, target)
+    # Words split across lines in the source PDF ("Ex- perienced") - rejoin them.
+    # ("pre- and post-sales" is a real phrase, so "and/or/to" never get joined.)
+    text = re.sub(r"\b([A-Za-z]{2,})-\s+(?!(?:and|or|to)\b)([a-z]{2,})\b", r"\1\2", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
