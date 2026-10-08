@@ -7,6 +7,7 @@ events so the dashboard can show what is happening live.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -458,8 +459,7 @@ class JobDiscoveryPipeline:
                 continue
             if job.company.lower() in excluded_companies:
                 continue
-            haystack = f"{job.title} {job.description[:1000]}".lower()
-            if any(keyword in haystack for keyword in excluded_keywords):
+            if excluded_keywords and _excluded(job, excluded_keywords):
                 continue
             kept.append(job)
 
@@ -863,6 +863,29 @@ async def users_due_for_scrape(session: AsyncSession) -> list[str]:
         if last is None or last <= now - timedelta(hours=interval):
             due.append(profile.user_id)
     return due
+
+
+# Level / role words describe the job when they are in the title, but appear in most
+# descriptions too ("work with senior engineers", "partner with product managers"),
+# so they are only matched against the title.
+_TITLE_ONLY_WORDS = {
+    "senior", "sr", "sr.", "lead", "principal", "staff", "manager", "director", "head", "head of",
+    "intern", "internship", "junior", "jr", "jr.", "vp", "architect", "trainee", "fresher",
+}
+
+
+def _excluded(job: ScrapedJob, keywords: list[str]) -> bool:
+    """Whole-word match: level words against the title, anything else against title + description."""
+    title = f" {job.title.lower()} "
+    body = f" {job.title} {job.description[:1500]} ".lower()
+    for keyword in keywords:
+        keyword = keyword.strip().lower()
+        if not keyword:
+            continue
+        pattern = r"(?<![a-z0-9])" + re.escape(keyword) + r"(?![a-z0-9])"
+        if re.search(pattern, title if keyword in _TITLE_ONLY_WORDS else body):
+            return True
+    return False
 
 
 def title_matches_roles(title: str, roles: list[str]) -> bool:

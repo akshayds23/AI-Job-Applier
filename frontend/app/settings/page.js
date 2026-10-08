@@ -234,7 +234,7 @@ function SearchCard() {
         <Field label="Never show these companies">
           <input className="input" value={form.excludedCompanies} onChange={e => set("excludedCompanies", e.target.value)} placeholder="Company A, Company B" />
         </Field>
-        <Field label="Skip jobs mentioning">
+        <Field label="Skip jobs mentioning" hint="Comma separated. Level words (Senior, Lead, Manager…) are matched in the job title only; other words and phrases anywhere in the posting.">
           <input className="input" value={form.excludedWords} onChange={e => set("excludedWords", e.target.value)} placeholder="unpaid, commission only" />
         </Field>
       </div>
