@@ -52,6 +52,9 @@ DEFAULT_QUERIES = ["Software Engineer"]
 LOCATION_AWARE_PLATFORMS = {"linkedin"}
 # Places searched per run (every target location is still used for filtering).
 MAX_SEARCH_LOCATIONS = 6
+# Time budgets inside the collect phase (a serverless step is killed at 300s).
+COMPANY_FETCH_SECONDS = 60.0
+BOARD_SEARCH_SECONDS = 90.0
 
 # The LLM pipeline is the slow part; cap how many jobs one run analyses so a
 # manual click returns in a predictable time and token spend stays bounded.
@@ -101,27 +104,52 @@ class JobDiscoveryPipeline:
         location: str = "",
         limit_per_query: int = 15,
         max_analysed: int = MAX_ANALYSED_PER_RUN,
+        deadline: float | None = None,
+        skip_platforms: set[str] | None = None,
     ) -> list[str]:
-        """Scrape, filter, verify, store and pre-filter. Returns job ids worth AI analysis."""
+        """Scrape, filter, verify, store and pre-filter. Returns job ids worth AI analysis.
+
+        ``deadline`` (time.monotonic) bounds the whole phase: on a serverless host
+        a step that overruns is killed and its work lost, so slow boards are cut
+        off and verification is skipped rather than overrunning.
+        """
+        start = time.monotonic()
+        deadline = deadline or start + 240
         async with AsyncSessionLocal() as session:
             context = await self._load_context(session, platforms, queries, location)
+        if skip_platforms:
+            context["platforms"] = [p for p in context["platforms"] if p not in skip_platforms]
         summary: dict[str, Any] = {"jobs_found": 0, "jobs_new": 0, "verified": 0, "suspicious": 0}
         await self._emit("discovery_started", {"run_id": run_id, "platforms": context["platforms"], "queries": context["queries"]})
 
         # Company career pages first: they are verified, employer-posted
         # openings, so they get first claim on the per-run analysis budget.
-        company_jobs = await self._scrape_watched_companies(context["queries"])
-        board_jobs: list[ScrapedJob] = []
+        try:
+            company_jobs = await asyncio.wait_for(
+                self._scrape_watched_companies(context["queries"]),
+                timeout=max(10.0, min(COMPANY_FETCH_SECONDS, deadline - start - 120)),
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Watched-company boards took too long; continuing without them this run")
+            company_jobs = []
+
+        # Job boards share one time budget and run concurrently; whatever is
+        # still running when it expires is cut off.
+        board_budget = max(20.0, min(BOARD_SEARCH_SECONDS, deadline - time.monotonic() - 100))
         global_boards = [p for p in context["platforms"] if p not in LOCATION_AWARE_PLATFORMS]
         place_boards = [p for p in context["platforms"] if p in LOCATION_AWARE_PLATFORMS]
+        searches = []
         if global_boards:
-            board_jobs += await ScraperRegistry.search_all(
-                platforms=global_boards, queries=context["queries"], location="", limit_per_query=limit_per_query,
-            )
+            searches.append(ScraperRegistry.search_all(
+                platforms=global_boards, queries=context["queries"], location="",
+                limit_per_query=limit_per_query, timeout=board_budget,
+            ))
         for place in context["locations"] if place_boards else []:
-            board_jobs += await ScraperRegistry.search_all(
-                platforms=place_boards, queries=context["queries"], location=place, limit_per_query=limit_per_query,
-            )
+            searches.append(ScraperRegistry.search_all(
+                platforms=place_boards, queries=context["queries"], location=place,
+                limit_per_query=limit_per_query, timeout=board_budget,
+            ))
+        board_jobs: list[ScrapedJob] = [job for found in await asyncio.gather(*searches) for job in found]
         seen = {job.dedup_hash for job in company_jobs}
         scraped = company_jobs + [job for job in board_jobs if job.dedup_hash not in seen]
         scraped = self._apply_user_filters(scraped, context)
@@ -131,8 +159,15 @@ class JobDiscoveryPipeline:
             return []
 
         # Real-job check, then analyse the most trustworthy postings first.
-        async with AsyncSessionLocal() as session:
-            trust = await JobVerifier(session).score_all(scraped)
+        # It probes employers' career sites, so it gets only the time that is left.
+        trust: dict = {}
+        try:
+            async with AsyncSessionLocal() as session:
+                trust = await asyncio.wait_for(
+                    JobVerifier(session).score_all(scraped), timeout=max(10.0, deadline - time.monotonic() - 60)
+                )
+        except asyncio.TimeoutError:
+            logger.warning("Verification ran out of time; saving %d jobs without trust checks", len(scraped))
         scraped.sort(key=lambda job: ranking_key(job, trust.get(job.dedup_hash)))
         summary["verified"] = sum(1 for t in trust.values() if t.label == "verified")
         summary["suspicious"] = sum(1 for t in trust.values() if t.label in ("suspicious", "stale"))

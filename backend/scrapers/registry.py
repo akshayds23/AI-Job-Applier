@@ -96,10 +96,13 @@ class ScraperRegistry:
         location: str = "",
         limit_per_query: int = 15,
         filters: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> list[ScrapedJob]:
         """Run every (platform, query) pair concurrently and merge the results.
 
         A failing plugin never takes the run down - it just contributes nothing.
+        With ``timeout``, searches still running when it expires are cancelled and
+        whatever finished is returned (a slow board must not stall the whole run).
         """
         cls.discover()
         semaphore = asyncio.Semaphore(settings.SCRAPER_CONCURRENCY)
@@ -120,11 +123,16 @@ class ScraperRegistry:
                     logger.warning("Scraper %s failed for %r: %s", platform, query, exc)
                     return []
 
-        tasks = [run_one(p, q) for p in platforms for q in (queries or [""])]
+        tasks = [asyncio.create_task(run_one(p, q)) for p in platforms for q in (queries or [""])]
         if not tasks:
             return []
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        done, pending = await asyncio.wait(tasks, timeout=max(1.0, timeout) if timeout is not None else None)
+        for task in pending:
+            task.cancel()
+        if pending:
+            logger.warning("Search time limit reached: %d of %d board searches cut off", len(pending), len(tasks))
+        results = [task.result() if not task.exception() else task.exception() for task in done]
 
         merged: dict[str, ScrapedJob] = {}
         for result in results:

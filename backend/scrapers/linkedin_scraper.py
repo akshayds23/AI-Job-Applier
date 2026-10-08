@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -35,6 +36,20 @@ DETAIL_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 _PAGE_SIZE = 10
 _MAX_PAGES = 4
 _MAX_DETAIL_FETCHES = 12  # keep the run polite and fast
+
+# Once LinkedIn answers 429 it keeps doing so for a while (hosting IPs especially);
+# retrying with back-off only burns the run's time budget, so skip it for a cool-off.
+_BLOCK_SECONDS = 15 * 60
+_blocked_until = 0.0
+
+
+def linkedin_blocked() -> bool:
+    return time.time() < _blocked_until
+
+
+def _block() -> None:
+    global _blocked_until
+    _blocked_until = time.time() + _BLOCK_SECONDS
 
 _JOB_ID_RE = re.compile(r"urn:li:jobPosting:(\d+)")
 _RELATIVE_TIME_RE = re.compile(r"(\d+)\s+(minute|hour|day|week|month)s?\s+ago", re.I)
@@ -65,6 +80,8 @@ class LinkedInScraper(BaseScraper):
         filters = filters or {}
         cards: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
+        if linkedin_blocked():
+            return []
 
         for page in range(_MAX_PAGES):
             params = {
@@ -77,12 +94,15 @@ class LinkedInScraper(BaseScraper):
             if filters.get("posted_within_hours"):
                 params["f_TPR"] = f"r{int(filters['posted_within_hours']) * 3600}"
 
+            if linkedin_blocked():
+                break
             response = await request_with_retry(
-                "GET", SEARCH_URL, params=params, headers={"Accept": "text/html"}
+                "GET", SEARCH_URL, params=params, headers={"Accept": "text/html"}, retry_on_429=False
             )
             if response is None or response.status_code != 200:
                 if response is not None and response.status_code == 429:
-                    logger.warning("LinkedIn rate-limited this run; returning partial results")
+                    _block()
+                    logger.warning("LinkedIn rate-limited; skipping it for %d min", _BLOCK_SECONDS // 60)
                 else:
                     logger.warning(
                         "LinkedIn search unavailable (%s)",
@@ -161,9 +181,14 @@ class LinkedInScraper(BaseScraper):
         return results
 
     async def _fetch_detail(self, job_id: str) -> dict[str, Any]:
+        if linkedin_blocked():
+            return {}
         response = await request_with_retry(
-            "GET", DETAIL_URL.format(job_id=job_id), headers={"Accept": "text/html"}, max_retries=1
+            "GET", DETAIL_URL.format(job_id=job_id), headers={"Accept": "text/html"}, max_retries=1,
+            retry_on_429=False,
         )
+        if response is not None and response.status_code == 429:
+            _block()
         if response is None or response.status_code != 200:
             return {}
 

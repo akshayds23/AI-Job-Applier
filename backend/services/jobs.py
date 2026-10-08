@@ -273,7 +273,18 @@ async def _discovery_step(job: BackgroundJob, payload: dict[str, Any], deadline:
     pipeline = JobDiscoveryPipeline(job.user_id)
     run_id = payload["run_id"]
     if payload.get("phase", "collect") == "collect":
-        payload["pending"] = await pipeline.collect(run_id)
+        # Recorded before scraping starts: if the host kills this step (timeout),
+        # the next attempt knows, drops LinkedIn (the usual culprit), and a third
+        # failure ends the run instead of retrying forever.
+        tries = int(payload.get("collect_tries", 0)) + 1
+        payload["collect_tries"] = tries
+        await _save_payload(job.id, payload)
+        if tries > MAX_COLLECT_TRIES:
+            message = "Search kept running out of time while collecting jobs. Try again later, or search fewer locations."
+            await pipeline.finish(run_id, "failed", message)
+            return StepResult("done", payload, message)
+        skip = {"linkedin"} if tries > 1 else None
+        payload["pending"] = await pipeline.collect(run_id, deadline=deadline, skip_platforms=skip)
         payload["phase"] = "analyse"
         if not payload["pending"]:
             await pipeline.finish(run_id)
@@ -290,6 +301,15 @@ async def _discovery_step(job: BackgroundJob, payload: dict[str, Any], deadline:
         wait = max(0, round(defer_until - time.time()))
         return StepResult("defer", payload, f"Waiting {wait}s for your API rate limit - {len(pending)} jobs left", defer_until)
     return StepResult("continue", payload, f"Analysing - {len(pending)} jobs left")
+
+
+MAX_COLLECT_TRIES = 3
+
+
+async def _save_payload(job_id: str, payload: dict[str, Any]) -> None:
+    async with AsyncSessionLocal() as db:
+        await db.execute(update(BackgroundJob).where(BackgroundJob.id == job_id).values(payload=dict(payload)))
+        await db.commit()
 
 
 async def _discovery_failed(job: BackgroundJob, message: str) -> None:
