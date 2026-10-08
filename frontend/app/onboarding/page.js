@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Briefcase, Check, KeyRound, Target, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, KeyRound, Target, Upload } from "lucide-react";
+import Logo from "@/components/Logo";
 import { api, startDiscovery } from "@/lib/api";
 import { Button, Card, Field, Notice } from "@/components/ui";
 import TitleSuggestions from "@/components/TitleSuggestions";
@@ -70,7 +71,7 @@ export default function Onboarding() {
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, background: "var(--bg)" }}>
       <div style={{ width: "100%", maxWidth: 560 }}>
         <div className="row" style={{ gap: 10, marginBottom: 24 }}>
-          <div className="brand-mark"><Briefcase size={17} /></div>
+          <Logo size={32} />
           <strong style={{ fontSize: "1.05rem" }}>AutoApplier</strong>
           <span className="spacer" />
           <span className="small muted">Step {step + 1} of {STEPS.length}</span>

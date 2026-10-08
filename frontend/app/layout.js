@@ -3,9 +3,12 @@ import AppShell from "@/components/AppShell";
 import AuthGuard from "@/components/AuthGuard";
 
 export const metadata = {
-  title: "AutoApplier",
+  title: { default: "AutoApplier", template: "%s | AutoApplier" },
+  applicationName: "AutoApplier",
   description: "Find verified jobs, tailor your resume truthfully, apply on company sites and track replies.",
 };
+
+export const viewport = { themeColor: "#2563eb" };
 
 // Applied before first paint so the saved theme never flashes the wrong colours.
 const themeScript = `

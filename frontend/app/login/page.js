@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { BadgeCheck, Briefcase, FileText, Inbox } from "lucide-react";
+import { BadgeCheck, FileText, Inbox } from "lucide-react";
+import Logo from "@/components/Logo";
 import { api } from "@/lib/api";
 import { Button, Field, Notice } from "@/components/ui";
 
@@ -45,9 +46,7 @@ export default function LoginPage() {
     <div className="auth-shell">
       <aside className="auth-aside">
         <div className="row" style={{ gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,0.18)", display: "grid", placeItems: "center" }}>
-            <Briefcase size={18} />
-          </div>
+          <Logo size={36} style={{ borderRadius: 9, boxShadow: "0 0 0 1.5px rgba(255,255,255,0.55)" }} />
           <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>AutoApplier</span>
         </div>
         <div>

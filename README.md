@@ -1,4 +1,6 @@
-# 🚀 AI Auto Applier — Autonomous Job Application System
+<p><img src="frontend/public/logo.svg" width="72" height="72" alt="AutoApplier logo"></p>
+
+# AutoApplier - Job Application Workspace
 
 An AI-powered multi-user SaaS platform that **automatically discovers, matches, tailors 1-page resumes, and applies to jobs** on your behalf across multiple platforms (LinkedIn, Indeed, RemoteOK, Naukri, Wellfound).
 

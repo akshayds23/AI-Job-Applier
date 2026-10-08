@@ -6,6 +6,7 @@ import {
   BarChart3, Briefcase, Building2, FileText, Inbox, KeyRound, LayoutDashboard, ListChecks,
   Settings, SquareKanban, User,
 } from "lucide-react";
+import Logo from "@/components/Logo";
 
 const SECTIONS = [
   {
@@ -49,7 +50,7 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark"><Briefcase size={17} /></div>
+        <Logo size={32} />
         <div>
           <div className="brand-name">AutoApplier</div>
           <div className="brand-sub">Job search workspace</div>

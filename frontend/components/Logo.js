@@ -1,0 +1,14 @@
+// AutoApplier mark: a resume page with an "applied" check. Same artwork as public/logo.svg.
+export default function Logo({ size = 32, title = "AutoApplier", style }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" role="img" aria-label={title} style={{ flexShrink: 0, display: "block", ...style }}>
+      <rect width="64" height="64" rx="14" fill="#2563eb" />
+      <path d="M19 12h15.5L45 22.5V48a4 4 0 0 1-4 4H19a4 4 0 0 1-4-4V16a4 4 0 0 1 4-4z" fill="#ffffff" />
+      <path d="M34.5 12v7a3.5 3.5 0 0 0 3.5 3.5h7z" fill="#bfd3fe" />
+      <rect x="20" y="27" width="16" height="3.2" rx="1.6" fill="#93b4fb" />
+      <rect x="20" y="34" width="11" height="3.2" rx="1.6" fill="#93b4fb" />
+      <circle cx="44" cy="44" r="11" fill="#14b8a6" stroke="#2563eb" strokeWidth="3" />
+      <path d="M39 44.2l3.4 3.4 6.6-6.8" fill="none" stroke="#ffffff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
