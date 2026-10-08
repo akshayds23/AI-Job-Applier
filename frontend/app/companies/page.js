@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Building2, ExternalLink, Eye, MapPin, Pause, Play, Plus, Trash2, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge, Button, Card, EmptyState, Field, Loading, Notice, PageHeader, timeAgo } from "@/components/ui";
+import SuggestedCompanies from "@/components/SuggestedCompanies";
 
 const ATS_LABELS = { greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby" };
 
@@ -87,6 +88,8 @@ export default function CompaniesPage() {
         </p>
         {error && <Notice tone="danger" style={{ marginTop: 12 }}>{error}</Notice>}
       </Card>
+
+      {!loading && <SuggestedCompanies watched={companies} onAdded={load} />}
 
       {loading ? (
         <Loading label="Loading watchlist..." />
