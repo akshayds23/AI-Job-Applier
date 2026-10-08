@@ -47,6 +47,11 @@ _REMOTE_WORDS = {"remote", "anywhere", "worldwide", "hybrid", "work from home", 
 
 DEFAULT_PLATFORMS = ["remoteok", "remotive", "jobicy", "himalayas", "linkedin", "arbeitnow"]
 DEFAULT_QUERIES = ["Software Engineer"]
+# Only these boards search by place; the others return the same global/remote
+# list whatever the location, so they are queried once per run, not per place.
+LOCATION_AWARE_PLATFORMS = {"linkedin"}
+# Places searched per run (every target location is still used for filtering).
+MAX_SEARCH_LOCATIONS = 6
 
 # The LLM pipeline is the slow part; cap how many jobs one run analyses so a
 # manual click returns in a predictable time and token spend stays bounded.
@@ -107,12 +112,15 @@ class JobDiscoveryPipeline:
         # openings, so they get first claim on the per-run analysis budget.
         company_jobs = await self._scrape_watched_companies(context["queries"])
         board_jobs: list[ScrapedJob] = []
-        for place in context["locations"]:
+        global_boards = [p for p in context["platforms"] if p not in LOCATION_AWARE_PLATFORMS]
+        place_boards = [p for p in context["platforms"] if p in LOCATION_AWARE_PLATFORMS]
+        if global_boards:
             board_jobs += await ScraperRegistry.search_all(
-                platforms=context["platforms"],
-                queries=context["queries"],
-                location=place,
-                limit_per_query=limit_per_query,
+                platforms=global_boards, queries=context["queries"], location="", limit_per_query=limit_per_query,
+            )
+        for place in context["locations"] if place_boards else []:
+            board_jobs += await ScraperRegistry.search_all(
+                platforms=place_boards, queries=context["queries"], location=place, limit_per_query=limit_per_query,
             )
         seen = {job.dedup_hash for job in company_jobs}
         scraped = company_jobs + [job for job in board_jobs if job.dedup_hash not in seen]
@@ -256,9 +264,9 @@ class JobDiscoveryPipeline:
         chosen_queries = [q for q in chosen_queries if q][:4]
 
         target_locations = [l.strip() for l in ((profile.target_locations if profile else None) or []) if l and l.strip()]
-        # Up to three places are searched; "Remote" is a preference, not a place.
+        # Up to MAX_SEARCH_LOCATIONS places are searched; "Remote" is a preference, not a place.
         place_locations = [l for l in target_locations if l.lower() not in _REMOTE_WORDS]
-        search_locations = ([location] if location else (place_locations[:3] or target_locations[:1])) or [""]
+        search_locations = ([location] if location else (place_locations[:MAX_SEARCH_LOCATIONS] or target_locations[:1])) or [""]
 
         return {
             "user": user,

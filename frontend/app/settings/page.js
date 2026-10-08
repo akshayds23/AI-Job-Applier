@@ -208,7 +208,7 @@ function SearchCard() {
           </Field>
           <TitleSuggestions value={form.roles} onChange={v => set("roles", v)} />
         </div>
-        <Field label="Locations" hint="Up to 3 places are searched, e.g. Bengaluru, Hyderabad, Remote.">
+        <Field label="Locations" hint="Up to 6 places are searched (add &quot;Remote&quot; for remote roles), e.g. Bengaluru, Hyderabad, Pune, Gurugram, Remote.">
           <input className="input" value={form.locations} onChange={e => set("locations", e.target.value)} placeholder="Bengaluru, Remote" />
         </Field>
         <Field label="Work arrangement">

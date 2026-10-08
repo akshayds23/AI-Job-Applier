@@ -107,7 +107,7 @@ export default function Onboarding() {
                 <input className="input" value={prefs.roles} onChange={e => setPrefs({ ...prefs, roles: e.target.value })} />
               </Field>
               <TitleSuggestions value={prefs.roles} onChange={v => setPrefs({ ...prefs, roles: v })} />
-              <Field label="Locations" hint="Up to 3, e.g. Bengaluru, Pune">
+              <Field label="Locations" hint="Up to 6, e.g. Bengaluru, Hyderabad, Pune, Remote">
                 <input className="input" value={prefs.locations} onChange={e => setPrefs({ ...prefs, locations: e.target.value })} />
               </Field>
               <Field label="Work arrangement">
