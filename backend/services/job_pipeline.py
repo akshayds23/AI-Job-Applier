@@ -60,6 +60,7 @@ TITLE_ONLY_REASON = ("Matched on the job title only: the posting came without a 
                      "Add the description to get a real AI match score.")
 # Time budgets inside the collect phase (a serverless step is killed at 300s).
 COMPANY_FETCH_SECONDS = 60.0
+COMPANY_FETCH_CONCURRENCY = 8
 BOARD_SEARCH_SECONDS = 90.0
 
 # The LLM pipeline is the slow part; cap how many jobs one run analyses so a
@@ -130,14 +131,9 @@ class JobDiscoveryPipeline:
 
         # Company career pages first: they are verified, employer-posted
         # openings, so they get first claim on the per-run analysis budget.
-        try:
-            company_jobs = await asyncio.wait_for(
-                self._scrape_watched_companies(context["queries"]),
-                timeout=max(10.0, min(COMPANY_FETCH_SECONDS, deadline - start - 120)),
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Watched-company boards took too long; continuing without them this run")
-            company_jobs = []
+        company_jobs = await self._scrape_watched_companies(
+            context["queries"], timeout=max(10.0, min(COMPANY_FETCH_SECONDS, deadline - start - 120)),
+        )
 
         # Job boards share one time budget and run concurrently; whatever is
         # still running when it expires is cut off.
@@ -382,8 +378,12 @@ class JobDiscoveryPipeline:
             "template": (profile.preferred_template if profile else None) or "classic",
         }
 
-    async def _scrape_watched_companies(self, queries: list[str]) -> list[ScrapedJob]:
-        """Open roles from the user's watched company boards that fit a target role."""
+    async def _scrape_watched_companies(self, queries: list[str], timeout: float | None = None) -> list[ScrapedJob]:
+        """Open roles from the user's watched company boards that fit a target role.
+
+        With ``timeout``, boards still loading when it expires are skipped for this
+        run; every board that did answer is kept (one slow board must not cost all).
+        """
         async with AsyncSessionLocal() as session:
             companies = list(
                 (
@@ -395,7 +395,8 @@ class JobDiscoveryPipeline:
         if not companies:
             return []
 
-        semaphore = asyncio.Semaphore(settings.SCRAPER_CONCURRENCY)
+        # Boards live on a few ATS hosts with generous limits; fetch several at once.
+        semaphore = asyncio.Semaphore(max(settings.SCRAPER_CONCURRENCY, COMPANY_FETCH_CONCURRENCY))
 
         async def fetch_one(company: Company) -> tuple[Company, list[ScrapedJob], str | None]:
             async with semaphore:
@@ -405,7 +406,14 @@ class JobDiscoveryPipeline:
                 except Exception as exc:
                     return company, [], str(exc)[:300]
 
-        results = await asyncio.gather(*(fetch_one(c) for c in companies))
+        tasks = {asyncio.create_task(fetch_one(c)): c for c in companies}
+        done, pending = await asyncio.wait(tasks, timeout=timeout)
+        for task in pending:
+            task.cancel()
+        results = [task.result() for task in done]
+        results += [(tasks[task], [], "Skipped this run: the careers page was slow to respond") for task in pending]
+        if pending:
+            logger.warning("Watched companies: %d of %d boards timed out this run", len(pending), len(companies))
 
         relevant: list[ScrapedJob] = []
         async with AsyncSessionLocal() as session:
@@ -439,13 +447,7 @@ class JobDiscoveryPipeline:
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=max_age) if max_age else None
 
         def location_ok(job: ScrapedJob) -> bool:
-            if preference == "remote":
-                return job.is_remote
-            here = (job.location or "").lower()
-            in_place = any(place.split(",")[0].strip() in here for place in places) if places else True
-            if preference == "onsite":
-                return in_place and not (job.is_remote and not places)
-            return in_place or job.is_remote
+            return location_allowed(job.location, job.is_remote, places, preference)
 
         kept: list[ScrapedJob] = []
         seen: set[str] = set()
@@ -920,16 +922,36 @@ def listing_allowed(listing: JobListing, prefs: dict[str, Any]) -> bool:
     if max_age and listing.posted_date:
         if listing.posted_date < datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=max_age):
             return False
-    places = prefs["places"]
-    here = (listing.location or "").lower()
-    in_place = any(place.split(",")[0].strip() in here for place in places) if places else True
-    if prefs["preference"] == "remote" and not listing.is_remote:
-        return False
-    if prefs["preference"] == "onsite" and not in_place:
-        return False
-    if not (in_place or listing.is_remote):
+    if not location_allowed(listing.location, bool(listing.is_remote), prefs["places"], prefs["preference"]):
         return False
     return not text_excluded(listing.title, listing.description_text, prefs["excluded_keywords"])
+
+
+# A remote job is only useful if it hires where the candidate lives. Boards label
+# region-locked roles like "USA · Remote" or "Germany, Netherlands · Remote".
+_OPEN_REMOTE_WORDS = ("worldwide", "anywhere", "global", "international", "apac", "asia", "emea & apac")
+
+
+def remote_open_to(location: str | None, home_words: tuple[str, ...]) -> bool:
+    text = (location or "").lower()
+    region = re.sub(r"\b(remote|fully remote|100% remote|work from home|wfh)\b", " ", text)
+    region = re.sub(r"[·,()|/\-]+", " ", region).strip()
+    if not region:
+        return True  # "Remote" with no region restriction
+    return any(word in text for word in _OPEN_REMOTE_WORDS + home_words)
+
+
+def location_allowed(location: str | None, is_remote: bool, places: list[str], preference: str,
+                     home_words: tuple[str, ...] = ("india",)) -> bool:
+    """Job location against the user's places and remote preference (shared by search, feed and queue)."""
+    here = (location or "").lower()
+    in_place = any(place.split(",")[0].strip() in here for place in places) if places else True
+    remote_ok = is_remote and remote_open_to(location, home_words + tuple(p.split(",")[0].strip() for p in places))
+    if preference == "remote":
+        return remote_ok
+    if preference == "onsite":
+        return in_place and not (is_remote and not places)
+    return in_place or remote_ok
 
 
 def title_matches_roles(title: str, roles: list[str]) -> bool:
