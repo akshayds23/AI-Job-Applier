@@ -63,6 +63,7 @@ HARD RULES
    needs most. Never restate the job's requirements as the candidate's experience.
 4. tailored_bullets: choose the {max_roles} roles most relevant to this job. For each, 2-{max_bullets}
    bullets, each a REPHRASING of one of that role's own bullets: keep its facts and most of its words,
+   keep every number it states (e.g. "110+ commits", "8 releases") - numbers are the strongest part,
    start with a strong verb, and use the job's vocabulary only where it describes the same thing.
    Do NOT add outcomes, results, collaborators or activities that the source line does not state
    (no "reduced time-to-market", "improved efficiency", etc. unless written). Max {max_bullet_chars} chars.

@@ -74,8 +74,11 @@ Rules:
   bullets written under that company.
 - Short lines like "Company - Title | 2016-2020" (e.g. under "Earlier experience") are experiences too:
   fill company, title, start_date and end_date from them, with empty bullets.
-- achievements: quantified highlights, awards and rankings stated anywhere in the resume
-  (e.g. "Scaled programs to 300+ schools"), rewritten as short standalone lines with the exact numbers.
+- projects.description: copy every line written under the project, verbatim and in order, each ending
+  with a period. Do not summarise or shorten it.
+- achievements: only items from an Achievements / Awards / Honours section, as complete sentences
+  with their exact numbers (e.g. "Scaled programs to 300+ schools"). Never pull fragments such as
+  "110+ commits" out of experience or project lines - those already appear there. [] if there is none.
 - skills: include items from skills/core-strengths sections; do not split one item into several.
 """
 

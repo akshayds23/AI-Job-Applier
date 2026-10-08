@@ -127,7 +127,7 @@ _CATEGORY_TITLES = {
 }
 
 MAX_ROLES_DETAILED = 4
-MAX_BULLETS_PER_ROLE = 4
+MAX_BULLETS_PER_ROLE = 5
 MAX_PROJECTS = 3
 MAX_EDUCATION = 3
 
@@ -329,8 +329,12 @@ class ResumeGenerator:
         detailed = 0
         for index, exp in enumerate(experiences[:14]):
             exp_id = str(exp.get("id", index))
+            own_from = None
             if exp_id in tailored_ids:
-                candidates = tailored_bullets[exp_id]
+                # Tailored lines first, then the role's own lines (the user's words) to fill
+                # the role; lines covering the same thing are skipped, page fitting trims extras.
+                candidates = list(tailored_bullets[exp_id]) + list(exp.get("bullets") or [])
+                own_from = len(tailored_bullets[exp_id])
                 limit = MAX_BULLETS_PER_ROLE
             elif detailed < MAX_ROLES_DETAILED + 2:
                 # Roles the tailor did not pick still show their own top lines;
@@ -340,8 +344,10 @@ class ResumeGenerator:
             else:
                 candidates, limit = [], 0
             bullets = []
-            for item in candidates:
+            for position, item in enumerate(candidates):
                 text = _clean_bullet(item)
+                if own_from is not None and position >= own_from and any(_same_point(text, b) for b in bullets):
+                    continue  # the tailored version of this line is already there
                 if text and not any(near_duplicate(text, prior) for prior in shown):
                     bullets.append(text)
                     shown.append(text)
@@ -358,7 +364,10 @@ class ResumeGenerator:
                 "tailored": exp_id in tailored_ids,
             })
 
-        chosen = [p for p in projects if str(p.get("id")) in set(selected_project_ids)] or projects
+        # The tailor's picks first, then the user's other projects, so a short tailored
+        # selection never leaves the page half empty (page fitting trims extras first).
+        picked = set(selected_project_ids)
+        chosen = [p for p in projects if str(p.get("id")) in picked] + [p for p in projects if str(p.get("id")) not in picked]
         formatted_projects = []
         for project in chosen[:MAX_PROJECTS]:
             if not project.get("name"):
@@ -375,18 +384,31 @@ class ResumeGenerator:
             formatted_projects = [p for p in formatted_projects if p["bullets"]]
 
         formatted_education = []
-        for edu in education[:MAX_EDUCATION]:
+        for edu in education[:MAX_EDUCATION + 2]:
             if not (edu.get("institution") or edu.get("degree")):
                 continue
             degree = str(edu.get("degree") or "").strip()
             field_name = str(edu.get("field") or "").strip()
             gpa = str(edu.get("gpa") or "").strip()
+            institution = str(edu.get("institution") or "").strip()
+            title = f"{degree} in {field_name}" if degree and field_name else (degree or field_name)
+            same = next((e for e in formatted_education if institution and e["institution"].lower() == institution.lower()), None)
+            if same is not None:
+                # Diplomas / certificates from the same school: one line under the main degree.
+                year = _format_dates(edu.get("start_date"), edu.get("end_date"), False)
+                same["extras"].append(f"{title} ({year})" if year else title)
+                continue
             formatted_education.append({
-                "institution": str(edu.get("institution") or "").strip(),
+                "institution": institution,
                 "dates": _format_dates(edu.get("start_date"), edu.get("end_date"), False),
-                "degree": f"{degree} in {field_name}" if degree and field_name else (degree or field_name),
+                "degree": title,
                 "gpa": f"CGPA: {gpa}" if gpa and not gpa.lower().startswith(("cgpa", "gpa")) else gpa,
+                "extras": [],
             })
+        for entry in formatted_education:
+            if entry["extras"]:
+                entry["degree"] = f"{entry['degree']}; also {', '.join(entry['extras'])}"
+        formatted_education = formatted_education[:MAX_EDUCATION]
 
         groups = self._skill_groups(skills_order, skill_groups, skill_categories)
 
@@ -409,7 +431,7 @@ class ResumeGenerator:
             projects=formatted_projects,
             education=formatted_education,
             skill_groups=groups,
-            achievements=[_clean_bullet(a) for a in achievements if str(a).strip()][:5],
+            achievements=_real_achievements(achievements, formatted_experiences, formatted_projects),
             certifications=[str(c).strip() for c in certifications if str(c).strip()][:5],
         )
 
@@ -935,6 +957,31 @@ def _ascii(text: str) -> str:
 def _md_safe(text: str) -> str:
     """Neutralise fpdf2 markdown markers inside user text."""
     return str(text).replace("**", "* *").replace("__", "_ _").replace("--", "- -")
+
+
+def _same_point(a: str, b: str) -> bool:
+    """Two lines make the same point: most of the shorter one's content words appear in the other."""
+    words = lambda s: {w for w in re.findall(r"[a-z0-9+]+", s.lower()) if len(w) > 3}
+    wa, wb = words(a), words(b)
+    if not wa or not wb:
+        return False
+    return len(wa & wb) / min(len(wa), len(wb)) >= 0.5
+
+
+def _real_achievements(items: list[Any], experiences: list[dict], projects: list[dict]) -> list[str]:
+    """Achievements that read as achievements: whole statements, not stray numbers
+    ("110+ commits") or facts already stated in an experience or project line."""
+    already = " ".join(b for block in experiences + projects for b in block.get("bullets", [])).lower()
+    kept: list[str] = []
+    for item in items:
+        text = _clean_bullet(item)
+        if len(text.split()) < 6:
+            continue
+        numbers = re.findall(r"\d[\d,.]*\+?", text)
+        if numbers and all(n.lower() in already for n in numbers):
+            continue
+        kept.append(text)
+    return kept[:5]
 
 
 def _clean_bullet(text: Any) -> str:
