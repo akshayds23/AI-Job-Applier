@@ -68,9 +68,9 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
-    GROQ_MODEL: str = "openai/gpt-oss-120b"
-    GEMINI_MODEL: str = "gemini-3.8-flash"
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
+    GEMINI_MODEL: str = "gemini-3.1-flash-lite"
+    OPENAI_MODEL: str = "gpt-4.1-nano"
     ANTHROPIC_MODEL: str = "claude-sonnet-4-5"
     LLM_TIMEOUT_SECONDS: float = 60.0
     LLM_MAX_RETRIES: int = 3

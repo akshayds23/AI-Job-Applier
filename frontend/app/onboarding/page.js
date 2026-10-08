@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Briefcase, Check, KeyRound, Target, Upload } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, startDiscovery } from "@/lib/api";
 import { Button, Card, Field, Notice } from "@/components/ui";
 import TitleSuggestions from "@/components/TitleSuggestions";
 
@@ -49,6 +49,9 @@ export default function Onboarding() {
       remote_preference: prefs.remote,
       is_onboarded: true,
     });
+    // First search starts right away (it runs in the background; the dashboard shows progress).
+    // Without an AI key it still runs, scoring with the free heuristics.
+    await startDiscovery().catch(() => {});
     router.push("/");
   });
 

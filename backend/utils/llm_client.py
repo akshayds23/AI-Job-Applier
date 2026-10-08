@@ -281,7 +281,7 @@ class LLMClient:
         if key.provider == "gemini":
             return await self._gemini(key, prompt, system_prompt, temperature, max_tokens, json_mode)
         if key.provider == "anthropic":
-            return await self._anthropic(key, prompt, system_prompt, max_tokens)
+            return await self._anthropic(key, prompt, system_prompt, max_tokens, temperature)
         raise KeyRejected(f"Unknown provider: {key.provider}")
 
     @staticmethod
@@ -325,6 +325,9 @@ class LLMClient:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if model.startswith("openai/gpt-oss"):
+            # Hidden reasoning is billed as output; these are extraction tasks, keep it short.
+            payload["reasoning_effort"] = "low"
         headers = {"Authorization": f"Bearer {key.api_key}", "Content-Type": "application/json"}
 
         async def post():
@@ -407,16 +410,25 @@ class LLMClient:
         }
         if system_prompt:
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+        if key.model.startswith("gemini-3"):
+            # Thinking tokens are billed as output; extraction and scoring need little of it.
+            generation_config["thinkingConfig"] = {"thinkingLevel": "low"}
 
-        response = await request_with_retry(
-            "POST",
-            url,
-            json=payload,
-            headers={"x-goog-api-key": key.api_key, "Content-Type": "application/json"},
-            timeout=settings.LLM_TIMEOUT_SECONDS,
-            respect_rate_limit=False,
-            retry_on_429=False,
-        )
+        async def post():
+            return await request_with_retry(
+                "POST",
+                url,
+                json=payload,
+                headers={"x-goog-api-key": key.api_key, "Content-Type": "application/json"},
+                timeout=settings.LLM_TIMEOUT_SECONDS,
+                respect_rate_limit=False,
+                retry_on_429=False,
+            )
+
+        response = await post()
+        if (response is not None and response.status_code == 400 and "thinking" in response.text.lower()
+                and generation_config.pop("thinkingConfig", None) is not None):
+            response = await post()  # a model that does not take this setting
         self._check(response, key)
 
         data = response.json()
@@ -426,7 +438,8 @@ class LLMClient:
         parts = candidates[0].get("content", {}).get("parts") or []
         return "".join(part.get("text", "") for part in parts)
 
-    async def _anthropic(self, key: PooledKey, prompt: str, system_prompt: str, max_tokens: int) -> str:
+    async def _anthropic(self, key: PooledKey, prompt: str, system_prompt: str, max_tokens: int,
+                         temperature: float = 0.2) -> str:
         # Current Claude models think adaptively and reject sampling parameters
         # (temperature/top_p), so none are sent. Low effort keeps these short
         # extraction/rewrite calls cheap; thinking shares max_tokens, so give room.
@@ -436,6 +449,12 @@ class LLMClient:
             "messages": [{"role": "user", "content": prompt}],
             "output_config": {"effort": "low"},
         }
+        if key.model.startswith("claude-haiku"):
+            # Haiku does not think unless asked and takes no effort setting; it still
+            # accepts temperature, and needs no extra room for thinking.
+            payload.pop("output_config")
+            payload["max_tokens"] = max_tokens
+            payload["temperature"] = temperature
         if system_prompt:
             payload["system"] = system_prompt
         headers = {

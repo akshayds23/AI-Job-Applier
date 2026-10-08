@@ -31,11 +31,14 @@ logger = get_logger("llm.keys")
 
 PROVIDERS = ("groq", "gemini", "openai", "anthropic")
 
+# Cheapest capable model per provider: the app only extracts, scores and rewrites
+# short text, so small models do the job at a fraction of the cost. Users can pick
+# a bigger model per key in Settings.
 DEFAULT_MODELS = {
-    "groq": "openai/gpt-oss-120b",
-    "gemini": "gemini-3.8-flash",
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-opus-5-5",
+    "groq": "openai/gpt-oss-20b",          # $0.075 / $0.30 per 1M tokens
+    "gemini": "gemini-3.1-flash-lite",     # $0.25 / $1.50
+    "openai": "gpt-4.1-nano",              # $0.10 / $0.40
+    "anthropic": "claude-haiku-4-5",       # $1 / $5
 }
 
 DEFAULT_COOLDOWN_SECONDS = 30.0

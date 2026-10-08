@@ -735,10 +735,8 @@ async def users_due_for_scrape(session: AsyncSession) -> list[str]:
         interval = max(1, profile.scrape_frequency_hours or 6)
         last = (
             await session.execute(
-                select(func.max(ScrapeRun.started_at)).where(
-                    ScrapeRun.user_id == profile.user_id,
-                    ScrapeRun.trigger == "scheduled",
-                )
+                # Any recent search counts - a manual run an hour ago makes a scheduled one wasteful.
+                select(func.max(ScrapeRun.started_at)).where(ScrapeRun.user_id == profile.user_id)
             )
         ).scalar()
         if last is None or last <= now - timedelta(hours=interval):
