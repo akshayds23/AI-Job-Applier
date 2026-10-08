@@ -37,8 +37,13 @@ async def get_matched_jobs(
     result = await db.execute(query)
     rows = result.all()
 
+    from services.job_pipeline import listing_allowed, load_filter_prefs
+
+    prefs = await load_filter_prefs(db, user.id)  # settings may have changed since these were found
     matches = []
     for match, job in rows:
+        if not listing_allowed(job, prefs):
+            continue
         matches.append({
             "match_id": match.id,
             "match_score": match.match_score,

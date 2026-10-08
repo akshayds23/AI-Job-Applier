@@ -65,8 +65,15 @@ async def get_applications(
 
     rows = (await db.execute(query)).all()
 
+    from services.job_pipeline import listing_allowed, load_filter_prefs
+
+    prefs = await load_filter_prefs(db, user.id)
     apps = []
     for app, job, match_score in rows:
+        # Untouched suggestions follow the current search settings; anything the
+        # user has prepared or applied to always stays visible.
+        if app.status == "pending" and not app.prepare_state and not listing_allowed(job, prefs):
+            continue
         apps.append({
             "id": app.id,
             "status": app.status,

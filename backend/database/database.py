@@ -90,6 +90,19 @@ async def _mark_title_only_matches() -> None:
             )
             if result.rowcount:
                 logger.info("Relabelled %d title-only job matches", result.rowcount)
+            # Title-only jobs are never auto-queued: withdraw untouched queue entries
+            # (prepared or applied ones stay) and show them as plain feed items again.
+            withdrawn = await conn.execute(text(
+                "DELETE FROM applications WHERE status = 'pending' AND prepare_state IS NULL "
+                "AND resume_pdf_path IS NULL AND match_id IN "
+                "(SELECT id FROM user_job_matches WHERE scoring_method = 'title_only')"
+            ))
+            await conn.execute(text(
+                "UPDATE user_job_matches SET status = 'new' WHERE scoring_method = 'title_only' AND status = 'queued' "
+                "AND id NOT IN (SELECT match_id FROM applications WHERE match_id IS NOT NULL)"
+            ))
+            if withdrawn.rowcount:
+                logger.info("Withdrew %d untouched title-only jobs from review queues", withdrawn.rowcount)
     except Exception as exc:  # never block startup over a data clean-up
         logger.warning("Title-only relabel skipped: %s", exc)
 

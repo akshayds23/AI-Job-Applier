@@ -875,17 +875,61 @@ _TITLE_ONLY_WORDS = {
 
 
 def _excluded(job: ScrapedJob, keywords: list[str]) -> bool:
-    """Whole-word match: level words against the title, anything else against title + description."""
-    title = f" {job.title.lower()} "
-    body = f" {job.title} {job.description[:1500]} ".lower()
+    return text_excluded(job.title, job.description, keywords)
+
+
+def text_excluded(title: str, description: str | None, keywords: list[str]) -> bool:
+    """Whole-word match: level words against the title, anything else against title + description.
+
+    A trailing dot is optional, so "Sr." also catches "Sr AI Engineer".
+    """
+    title_text = f" {(title or '').lower()} "
+    body = f" {title or ''} {(description or '')[:1500]} ".lower()
     for keyword in keywords:
-        keyword = keyword.strip().lower()
-        if not keyword:
+        base = keyword.strip().lower().rstrip(".")
+        if not base:
             continue
-        pattern = r"(?<![a-z0-9])" + re.escape(keyword) + r"(?![a-z0-9])"
-        if re.search(pattern, title if keyword in _TITLE_ONLY_WORDS else body):
+        pattern = r"(?<![a-z0-9])" + re.escape(base) + r"\.?(?![a-z0-9])"
+        title_only = base in _TITLE_ONLY_WORDS or f"{base}." in _TITLE_ONLY_WORDS
+        if re.search(pattern, title_text if title_only else body):
             return True
     return False
+
+
+async def load_filter_prefs(session: AsyncSession, user_id: str) -> dict[str, Any]:
+    """The user's current job-search filters, for checking jobs already in the feed or queue."""
+    profile = (await session.execute(select(UserProfile).where(UserProfile.user_id == user_id))).scalar_one_or_none()
+    locations = [l.strip() for l in ((profile.target_locations if profile else None) or []) if l and l.strip()]
+    return {
+        "excluded_companies": {c.strip().lower() for c in ((profile.excluded_companies if profile else None) or []) if c},
+        "excluded_keywords": [k for k in ((profile.keywords_exclude if profile else None) or []) if k],
+        "places": [l.lower() for l in locations if l.lower() not in _REMOTE_WORDS],
+        "preference": (profile.remote_preference if profile else None) or "any",
+        "max_age_days": profile.max_job_age_days if profile else None,
+    }
+
+
+def listing_allowed(listing: JobListing, prefs: dict[str, Any]) -> bool:
+    """Same rules as a new search (location, remote, age, companies, keywords) for a stored job.
+
+    Settings change after jobs were found; this keeps the feed and queue in line with them.
+    """
+    if (listing.company or "").strip().lower() in prefs["excluded_companies"]:
+        return False
+    max_age = prefs.get("max_age_days")
+    if max_age and listing.posted_date:
+        if listing.posted_date < datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=max_age):
+            return False
+    places = prefs["places"]
+    here = (listing.location or "").lower()
+    in_place = any(place.split(",")[0].strip() in here for place in places) if places else True
+    if prefs["preference"] == "remote" and not listing.is_remote:
+        return False
+    if prefs["preference"] == "onsite" and not in_place:
+        return False
+    if not (in_place or listing.is_remote):
+        return False
+    return not text_excluded(listing.title, listing.description_text, prefs["excluded_keywords"])
 
 
 def title_matches_roles(title: str, roles: list[str]) -> bool:
