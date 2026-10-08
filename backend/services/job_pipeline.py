@@ -35,7 +35,7 @@ from database.models import (
     utcnow,
 )
 from agents.skill_matcher import analyse_job_description, score_match as heuristic_score
-from scrapers.base_scraper import ScrapedJob, tokenize_query
+from scrapers.base_scraper import ScrapedJob, has_description, tokenize_query
 from scrapers.registry import ScraperRegistry
 from services.ats import BoardRef, fetch_board
 from services.job_verifier import JobVerifier, TrustResult, ranking_key
@@ -52,6 +52,11 @@ DEFAULT_QUERIES = ["Software Engineer"]
 LOCATION_AWARE_PLATFORMS = {"linkedin"}
 # Places searched per run (every target location is still used for filtering).
 MAX_SEARCH_LOCATIONS = 6
+# Jobs without a description are listed as "title only": never above this score,
+# never sent to the AI, never auto-queued (the user can paste the description).
+TITLE_ONLY_SCORE_CAP = 60.0
+TITLE_ONLY_REASON = ("Matched on the job title only: the posting came without a description. "
+                     "Add the description to get a real AI match score.")
 # Time budgets inside the collect phase (a serverless step is killed at 300s).
 COMPANY_FETCH_SECONDS = 60.0
 BOARD_SEARCH_SECONDS = 90.0
@@ -177,10 +182,16 @@ class JobDiscoveryPipeline:
             summary["jobs_new"] = new_count
             unmatched = await self._filter_unmatched(session, stored)
 
-        analysed, prefiltered = self._prefilter(unmatched, context, max_analysed)
-        if prefiltered:
+        # Without a description an AI "match score" is a guess from the title, so
+        # those jobs are listed as title-only (no AI tokens) until a description exists.
+        described = [job for job in unmatched if has_description(job.get("description_text"))]
+        title_only = [job for job in unmatched if not has_description(job.get("description_text"))]
+        analysed, prefiltered = self._prefilter(described, context, max_analysed)
+        if prefiltered or title_only:
             async with AsyncSessionLocal() as session:
                 await self._save_prefiltered(session, prefiltered)
+                await self._save_title_only(session, title_only, context)
+        summary["title_only"] = len(title_only)
         await self._save_progress(run_id, summary)
         return [job["id"] for job in analysed]
 
@@ -618,6 +629,64 @@ class JobDiscoveryPipeline:
         except IntegrityError:
             await session.rollback()
 
+    def _title_baseline(self, job: dict[str, Any], context: dict[str, Any]):
+        return heuristic_score(
+            candidate_skills=[s["name"] for s in context["skills"]],
+            candidate_years=context["profile_dict"].get("experience_years"),
+            candidate_titles=[e["title"] for e in context["experiences"] if e.get("title")],
+            target_roles=context["queries"],
+            job_title=job["title"],
+            jd_analysis=analyse_job_description(job["title"], ""),
+        )
+
+    async def _save_title_only(self, session: AsyncSession, jobs: list[dict[str, Any]], context: dict[str, Any]) -> None:
+        for job in jobs:
+            baseline = self._title_baseline(job, context)
+            session.add(UserJobMatch(
+                user_id=self.user_id,
+                job_id=job["id"],
+                match_score=min(float(baseline.score), TITLE_ONLY_SCORE_CAP),
+                matched_skills=[],
+                gap_skills=[],
+                reasoning=TITLE_ONLY_REASON,
+                scoring_method="title_only",
+                status="new",
+            ))
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+
+    async def rescore_with_description(self, job_id: str, description: str) -> dict[str, Any]:
+        """The user pasted a job's description: store it and analyse that one job with AI.
+
+        Replaces the title-only match; creates a review-queue entry if it now meets
+        the user's minimum score. Returns the new match score and status.
+        """
+        description = description.strip()
+        async with AsyncSessionLocal() as session:
+            listing = await session.get(JobListing, job_id)
+            if listing is None:
+                raise ValueError("Job not found")
+            listing.description_text = description[:20000]
+            existing = (await session.execute(
+                select(UserJobMatch).where(UserJobMatch.user_id == self.user_id, UserJobMatch.job_id == job_id)
+            )).scalars().all()
+            for row in existing:
+                await session.delete(row)
+            await session.commit()
+            context = await self._load_context(session, None, None, "")
+        job = {"id": job_id, "title": listing.title, "company": listing.company, "platform": listing.platform,
+               "description_text": listing.description_text}
+        counters, finished, defer_until = await self._analyse([job], context, "", time.monotonic() + 600)
+        async with AsyncSessionLocal() as session:
+            match = (await session.execute(
+                select(UserJobMatch).where(UserJobMatch.user_id == self.user_id, UserJobMatch.job_id == job_id)
+            )).scalars().first()
+        if match is None:
+            raise RuntimeError("AI is busy (rate limit) - try again in a minute" if defer_until else "Analysis failed")
+        return {"match_score": match.match_score, "status": match.status, "scoring_method": match.scoring_method}
+
     async def _analyse(
         self, jobs: list[dict[str, Any]], context: dict[str, Any], run_id: str, deadline: float = float("inf")
     ) -> tuple[dict[str, int], set[str], float | None]:
@@ -695,6 +764,15 @@ class JobDiscoveryPipeline:
 
         if not should_apply:
             counters["skipped_low_score"] += 1
+            await session.commit()
+            return
+
+        # Re-scored job that is already in the review queue: point it at the new score.
+        existing_app = (await session.execute(
+            select(Application).where(Application.user_id == self.user_id, Application.job_id == job["id"])
+        )).scalars().first()
+        if existing_app is not None:
+            existing_app.match_id = match.id
             await session.commit()
             return
 

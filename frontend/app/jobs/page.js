@@ -38,6 +38,61 @@ function ageInDays(date) {
   return (Date.now() - then.getTime()) / 86400000;
 }
 
+// Postings that came without a description get no AI score (it would be a guess from
+// the title). Pasting the description from the posting scores that one job with AI.
+function AddDescription({ jobId, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.addJobDescription(jobId, text);
+      setOpen(false);
+      setText("");
+      onDone?.();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <p className="small secondary" style={{ marginTop: 10, lineHeight: 1.55 }}>
+        No description came with this posting, so it is matched on the title only.{" "}
+        <button className="link-button" onClick={() => setOpen(true)} style={{ color: "var(--primary)", fontWeight: 600 }}>
+          Add description
+        </button>{" "}
+        to get a real AI match score.
+      </p>
+    );
+  }
+  return (
+    <div style={{ marginTop: 10 }}>
+      <textarea
+        className="textarea"
+        rows={6}
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="Open the posting, copy the full job description and paste it here."
+      />
+      <div className="row" style={{ marginTop: 8 }}>
+        <Button variant="primary" size="sm" loading={busy} disabled={text.trim().length < 200} onClick={submit}>
+          Score with AI
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+        <span className="small secondary">Uses one AI call.</span>
+      </div>
+      {error && <p className="small" style={{ color: "var(--danger)", marginTop: 6 }}>{error}</p>}
+    </div>
+  );
+}
+
 export default function JobsPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -236,9 +291,13 @@ export default function JobsPage() {
                         {job.posted_date && <span className="row" style={{ gap: 4 }}><Calendar size={14} /> {timeAgo(job.posted_date)}</span>}
                         {job.salary_min && <span>{job.salary_currency || ""} {job.salary_min.toLocaleString()}{job.salary_max ? `–${job.salary_max.toLocaleString()}` : ""}</span>}
                       </div>
-                      <p className="small secondary" style={{ marginTop: 10, lineHeight: 1.55 }}>
-                        {(job.description_text || "No description provided.").slice(0, open ? 1200 : 240)}{(job.description_text || "").length > 240 ? "…" : ""}
-                      </p>
+                      {item.scoring_method === "title_only" ? (
+                        <AddDescription jobId={job.id} onDone={load} />
+                      ) : (
+                        <p className="small secondary" style={{ marginTop: 10, lineHeight: 1.55 }}>
+                          {(job.description_text || "No description provided.").slice(0, open ? 1200 : 240)}{(job.description_text || "").length > 240 ? "…" : ""}
+                        </p>
+                      )}
                       {(item.matched_skills?.length > 0 || item.gap_skills?.length > 0) && (
                         <div className="row" style={{ marginTop: 10, gap: 6 }}>
                           {(item.matched_skills || []).slice(0, 8).map(s => <span key={s} className="chip chip-success">{s}</span>)}
@@ -261,7 +320,9 @@ export default function JobsPage() {
                         </button>
                       </div>
                     </div>
-                    <ScoreRing score={item.match_score} />
+                    {item.scoring_method === "title_only"
+                      ? <Badge title="No description came with this posting, so it has no real match score yet">Title only</Badge>
+                      : <ScoreRing score={item.match_score} />}
                   </div>
                 </Card>
               );

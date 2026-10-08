@@ -64,7 +64,34 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _apply_lightweight_migrations()
+    await _mark_title_only_matches()
     logger.info("Schema ready (%s)", "sqlite" if _is_sqlite else "postgres")
+
+
+async def _mark_title_only_matches() -> None:
+    """Earlier versions AI-scored jobs that had no description (often 90%+ from the
+    title alone). Relabel those as title-only and cap their score. Idempotent."""
+    from sqlalchemy import text
+
+    from scrapers.base_scraper import MIN_DESCRIPTION_CHARS
+    from services.job_pipeline import TITLE_ONLY_REASON, TITLE_ONLY_SCORE_CAP
+
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text(
+                    "UPDATE user_job_matches SET scoring_method = 'title_only', reasoning = :reason, "
+                    "match_score = CASE WHEN match_score > :cap THEN :cap ELSE match_score END "
+                    "WHERE (scoring_method IS NULL OR scoring_method <> 'title_only') AND job_id IN ("
+                    "SELECT id FROM job_listings WHERE description_text IS NULL "
+                    "OR LENGTH(TRIM(description_text)) < :min_chars)"
+                ),
+                {"reason": TITLE_ONLY_REASON, "cap": TITLE_ONLY_SCORE_CAP, "min_chars": MIN_DESCRIPTION_CHARS},
+            )
+            if result.rowcount:
+                logger.info("Relabelled %d title-only job matches", result.rowcount)
+    except Exception as exc:  # never block startup over a data clean-up
+        logger.warning("Title-only relabel skipped: %s", exc)
 
 
 # Columns added after the first release. Keeping this tiny, explicit list means

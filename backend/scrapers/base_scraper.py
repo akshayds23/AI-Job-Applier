@@ -185,6 +185,15 @@ def looks_remote(text: str) -> bool:
     return any(hint in lowered for hint in _REMOTE_HINTS)
 
 
+# Below this, a "description" is a blurb or empty (common for LinkedIn from hosting
+# IPs): an AI match score built from it would really be a title-only guess.
+MIN_DESCRIPTION_CHARS = 200
+
+
+def has_description(text: str | None) -> bool:
+    return len((text or "").strip()) >= MIN_DESCRIPTION_CHARS
+
+
 def infer_seniority(title: str) -> str:
     lowered = f" {(title or '').lower()} "
     for level, needles in _SENIORITY_PATTERNS:

@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging_config import get_logger
 from database.models import AtsLookup, JobListing, utcnow
-from scrapers.base_scraper import ScrapedJob, normalise_key
+from scrapers.base_scraper import MIN_DESCRIPTION_CHARS, ScrapedJob, normalise_key
 from services.ats import BoardNotFound, BoardRef, detect_board, fetch_board, find_board_in_text
 
 logger = get_logger("verifier")
@@ -120,6 +120,11 @@ class JobVerifier:
                 score += 35
                 verified_url = match.apply_url or match.url
                 flags.append(f"Also listed on {job.company}'s careers page")
+                # Job boards (LinkedIn especially, from hosting IPs) often return no
+                # description; the employer's own posting has the full text.
+                if len((job.description or "").strip()) < MIN_DESCRIPTION_CHARS and match.description:
+                    job.description = match.description
+                    job.description_html = match.description_html or job.description_html
             else:
                 score -= 20
                 not_on_board = True

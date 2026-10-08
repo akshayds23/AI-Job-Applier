@@ -130,6 +130,7 @@ export const api = {
   triggerLiveScrape: () => fetchApi("/jobs/scrape", { method: "POST" }),
   getScrapeRuns: (limit = 5) => fetchApi(`/jobs/runs?limit=${limit}`),
   getCompanies: () => fetchApi("/companies/"),
+  addJobDescription: (jobId, description) => fetchApi(`/jobs/${jobId}/description`, { method: "POST", body: JSON.stringify({ description }) }),
   addCompany: (name, careersUrl) => fetchApi("/companies/", { method: "POST", body: JSON.stringify({ name, careers_url: careersUrl }) }),
   checkCompany: (id) => fetchApi(`/companies/${id}/check`, { method: "POST" }),
   setCompanyActive: (id, isActive) => fetchApi(`/companies/${id}?is_active=${isActive}`, { method: "PATCH" }),

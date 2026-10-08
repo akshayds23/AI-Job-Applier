@@ -1,4 +1,7 @@
+import asyncio
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from database.database import get_db
@@ -42,6 +45,8 @@ async def get_matched_jobs(
             "matched_skills": match.matched_skills,
             "gap_skills": match.gap_skills,
             "status": match.status,
+            "scoring_method": match.scoring_method,
+            "reasoning": match.reasoning,
             "matched_at": match.matched_at,
             "job": {
                 "id": job.id,
@@ -120,6 +125,40 @@ async def list_scrape_runs(
     ).scalars().all()
     job = job_view(await active_job(user.id, "discovery"))
     return [_run_to_dict(run, job if run.status == "running" else None) for run in runs]
+
+
+class DescriptionIn(BaseModel):
+    description: str
+
+
+@router.post("/{job_id}/description")
+async def add_description(job_id: str, data: DescriptionIn, user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    """The user pasted a posting's description: store it and AI-score that one job (one call)."""
+    from services.job_pipeline import JobDiscoveryPipeline
+    from utils.llm_keys import JobWaitPolicy, reset_job_policy, set_job_policy
+
+    text_in = (data.description or "").strip()
+    if len(text_in) < 200:
+        raise HTTPException(status_code=400, detail="Paste the full job description (at least a few paragraphs).")
+    owned = (await db.execute(
+        select(UserJobMatch.id).where(UserJobMatch.user_id == user.id, UserJobMatch.job_id == job_id)
+    )).first()
+    if owned is None:
+        raise HTTPException(status_code=404, detail="Job not found in your feed")
+    if current_keyring() is None or not current_keyring().keys:
+        raise HTTPException(status_code=400, detail=NO_KEYS_MESSAGE)
+
+    # Short waits only: a rate-limited key answers "try again" instead of holding the request.
+    token = set_job_policy(JobWaitPolicy(allow_fallback=False, inline_wait_seconds=20))
+    try:
+        return await asyncio.wait_for(JobDiscoveryPipeline(user.id).rescore_with_description(job_id, text_in), 120)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail="The AI took too long - try again in a minute")
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    finally:
+        reset_job_policy(token)
 
 
 @router.post("/work")
