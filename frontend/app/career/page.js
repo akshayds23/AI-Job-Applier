@@ -5,7 +5,7 @@ import { Check, FileUp, FolderGit2, Globe, Layers, Plus, Trash2, X } from "lucid
 import { api } from "@/lib/api";
 import { Badge, Button, Card, EmptyState, Field, Loading, Notice, PageHeader } from "@/components/ui";
 
-const KIND_LABELS = { project: "Project", highlight: "Work highlight", skill: "Skill" };
+const KIND_LABELS = { project: "Project", highlight: "Work highlight", achievement: "Achievement", skill: "Skill" };
 const SOURCE_LABELS = { github: "GitHub", portfolio: "Portfolio", document: "Document", manual: "Added by you" };
 const splitList = (text) => text.split(",").map(s => s.trim()).filter(Boolean);
 
@@ -100,6 +100,7 @@ function AddManually({ roles, onAdded }) {
           <select className="select" value={kind} onChange={e => setKind(e.target.value)}>
             <option value="highlight">Work highlight</option>
             <option value="project">Project</option>
+            <option value="achievement">Achievement</option>
             <option value="skill">Skill</option>
           </select>
         </Field>
@@ -107,13 +108,13 @@ function AddManually({ roles, onAdded }) {
           {kind === "project" && (
             <Field label="Project name"><input className="input" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Expense Tracker" /></Field>
           )}
-          <Field label={kind === "skill" ? "Skill" : kind === "project" ? "What it does and how" : "What you did"}>
+          <Field label={kind === "skill" ? "Skill" : kind === "project" ? "What it does and how" : kind === "achievement" ? "Achievement (award, certification, result)" : "What you did"}>
             {kind === "skill"
               ? <input className="input" value={text} onChange={e => setText(e.target.value)} placeholder="e.g. Docker" />
               : <textarea className="textarea" rows={3} value={text} onChange={e => setText(e.target.value)}
-                  placeholder={kind === "project" ? "What it does, how it is built." : "e.g. Set up automated nightly database backups with alerts when a backup fails."} />}
+                  placeholder={kind === "project" ? "What it does, how it is built." : kind === "achievement" ? "e.g. Won first place at a national hackathon out of 300 teams." : "e.g. Set up automated nightly database backups with alerts when a backup fails."} />}
           </Field>
-          {kind !== "skill" && (
+          {(kind === "project" || kind === "highlight") && (
             <Field label="Technologies (comma separated)"><input className="input" value={skills} onChange={e => setSkills(e.target.value)} placeholder="e.g. Python, PostgreSQL, Docker" /></Field>
           )}
           {kind === "highlight" && roles.length > 0 && (
@@ -201,7 +202,7 @@ export default function CareerPage() {
 
   if (!data) return <Loading label="Loading your career profile..." />;
   // Projects and work highlights matter most; skills come last.
-  const order = { project: 0, highlight: 1, skill: 2 };
+  const order = { project: 0, highlight: 1, achievement: 2, skill: 3 };
   const byKind = (a, b) => order[a.kind] - order[b.kind];
   const pending = data.facts.filter(f => f.status === "pending").sort(byKind);
   const approved = data.facts.filter(f => f.status === "approved").sort(byKind);

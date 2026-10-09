@@ -55,6 +55,9 @@ RESPONSIBILITIES: {responsibilities}
 HARD RULES
 1. Never invent skills, employers, titles, dates or numbers. Every number you write must appear
    in the candidate material above.
+   Write like a person, not an AI: plain words and short, concrete sentences. Never use em or en
+   dashes (use a comma, colon or a plain hyphen), and avoid stock words such as leverage, utilize,
+   spearhead, seamless, robust, cutting-edge, showcase, passionate, dynamic, synergy, delve.
 2. headline: 2-4 short phrases separated by " | " (max {max_headline} chars) describing the candidate
    in this job's vocabulary, e.g. "Technical Program Manager | AI & Robotics | Cross-functional Delivery".
    Only phrases the candidate's experience supports.

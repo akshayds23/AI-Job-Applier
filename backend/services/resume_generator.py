@@ -128,8 +128,9 @@ _CATEGORY_TITLES = {
 
 MAX_ROLES_DETAILED = 4
 MAX_BULLETS_PER_ROLE = 6
-MAX_PROJECTS = 5  # the fill-the-page ladder trims down to what fits
+MAX_PROJECTS = 3  # each project is an interview topic; spare space goes to skills
 MAX_EDUCATION = 3
+MAX_EXTRA_SKILLS = 18
 
 
 @dataclass
@@ -209,6 +210,7 @@ class ResumeGenerator:
             selected_project_ids=selected_project_ids or [],
             certifications=certifications or [],
         )
+        _tidy_content(content)
 
         # The built-in fitter picks how much content fills one page; LaTeX starts from
         # that choice (and tries the next fuller step first) and fine-tunes spacing itself.
@@ -414,6 +416,17 @@ class ResumeGenerator:
         formatted_education = formatted_education[:MAX_EDUCATION]
 
         groups = self._skill_groups(skills_order, skill_groups, skill_categories)
+        shown_skills = {m.lower() for _, members in groups for m in members}
+        extra: list[str] = []
+        for name in list(skills_order) + list(skill_categories):
+            name = clean_text(name)
+            if name and name.lower() not in shown_skills and name.lower() not in _NOT_TECH:
+                shown_skills.add(name.lower())
+                extra.append(name)
+        if extra:
+            # The rest of the user's skills (resume + approved career profile); the
+            # page-fitting ladder shortens or drops this line before touching projects.
+            groups.append(("Also worked with", extra[:MAX_EXTRA_SKILLS]))
 
         links = []
         for label, key in (("LinkedIn", "linkedin_url"), ("GitHub", "github_url"), ("Portfolio", "portfolio_url")):
@@ -803,7 +816,7 @@ _TEX_SPECIALS = {
     # Without T1 font encoding pdflatex prints a bare "|" as an em dash.
     "|": r"\textbar{}", "<": r"\textless{}", ">": r"\textgreater{}",
 }
-_TEX_UNICODE = {"→": r"$\rightarrow$", "–": "--", "—": "---", "₹": "Rs.", "•": r"\textbullet{}", "…": r"\ldots{}",
+_TEX_UNICODE = {"→": r"$\rightarrow$", "–": "-", "—": "-", "₹": "Rs.", "•": r"\textbullet{}", "…": r"\ldots{}",
                 "≥": r"$\geq$", "≤": r"$\leq$", "×": r"$\times$"}
 
 
@@ -891,9 +904,18 @@ def render_tex(c: ResumeContent, density: int = 0) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _keep_projects(n: int):
+
+
+def _extra_skills(n: int):
     def step(content: ResumeContent) -> None:
-        content.projects = content.projects[:n]
+        groups = []
+        for name, members in content.skill_groups:
+            if name == "Also worked with":
+                if n == 0:
+                    continue
+                members = members[:n]
+            groups.append((name, members))
+        content.skill_groups = groups
     return step
 
 
@@ -1014,6 +1036,55 @@ def _md_safe(text: str) -> str:
     return str(text).replace("**", "* *").replace("__", "_ _").replace("--", "- -")
 
 
+# Typography and stock phrases that make a resume read as machine-written.
+_DASH_RE = re.compile(r"\s*[—–]\s*")
+_AI_WORDS = [
+    (r"\bleverag(?:e|es|ed|ing)\b", {"e": "use", "es": "uses", "ed": "used", "ing": "using"}),
+    (r"\butili[sz](?:e|es|ed|ing)\b", {"e": "use", "es": "uses", "ed": "used", "ing": "using"}),
+    (r"\bspearhead(?:s|ed|ing)?\b", {"": "lead", "s": "leads", "ed": "led", "ing": "leading"}),
+    (r"\bshowcas(?:e|es|ed|ing)\b", {"e": "show", "es": "shows", "ed": "showed", "ing": "showing"}),
+]
+_AI_PHRASES = [
+    (re.compile(r"\bseamless(?:ly)?\s+", re.I), ""),
+    (re.compile(r"\bcutting[- ]edge\b", re.I), "modern"),
+    (re.compile(r"\bstate[- ]of[- ]the[- ]art\b", re.I), "modern"),
+    (re.compile(r"\brobust\b", re.I), "reliable"),
+    (re.compile(r"\bpassionate about\b", re.I), "interested in"),
+]
+
+
+def plain_text(text: str) -> str:
+    """No em/en dashes, no stock AI words: reads like a person wrote it."""
+    if not text:
+        return text
+    text = _DASH_RE.sub(lambda m: " - " if m.group(0).strip() != m.group(0) else "-", text)
+    for pattern, forms in _AI_WORDS:
+        def swap(match: re.Match, forms=forms) -> str:
+            word = match.group(0)
+            suffix = next(s for s in sorted(forms, key=len, reverse=True) if word.lower().endswith(s))
+            out = forms[suffix]
+            return out[0].upper() + out[1:] if word[0].isupper() else out
+        text = re.sub(pattern, swap, text, flags=re.I)
+    for pattern, repl in _AI_PHRASES:
+        text = pattern.sub(lambda m, r=repl: (r[:1].upper() + r[1:]) if (r and m.group(0)[0].isupper()) else r, text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def _tidy_content(c: "ResumeContent") -> None:
+    """Apply plain_text to every line of the resume."""
+    c.headline = plain_text(c.headline)
+    c.summary = plain_text(c.summary)
+    for block in c.experiences + c.projects:
+        block["bullets"] = [plain_text(b) for b in block["bullets"]]
+        for key in ("title", "name"):
+            if key in block:
+                block[key] = _DASH_RE.sub(" - ", block[key])
+    for edu in c.education:
+        edu["degree"] = _DASH_RE.sub(" - ", edu["degree"])
+    c.achievements = [plain_text(a) for a in c.achievements]
+    c.skill_groups = [(name, [_DASH_RE.sub("-", s) for s in members]) for name, members in c.skill_groups]
+
+
 def _same_point(a: str, b: str) -> bool:
     """Two lines make the same point: most of the shorter one's content words appear in the other."""
     words = lambda s: {w for w in re.findall(r"[a-z0-9+]+", s.lower()) if len(w) > 3}
@@ -1088,7 +1159,7 @@ def _format_dates(start: Any, end: Any, is_current: Any) -> str:
     start_text = str(start or "").strip()
     end_text = "Present" if is_current else str(end or "").strip()
     if start_text and end_text and start_text != end_text:
-        return f"{start_text} – {end_text}"
+        return f"{start_text} - {end_text}"
     return start_text or end_text or ""
 
 
@@ -1110,10 +1181,11 @@ def list_templates() -> list[dict[str, str]]:
 # roles, older roles' detail), the main role's own lines last.
 _FILL_STEPS = (
     lambda content: None,
-    _keep_projects(4),
+    _extra_skills(12),
     _project_lines(3),
-    _keep_projects(3),
+    _extra_skills(6),
     _trim_untailored,
+    _extra_skills(0),
     _first_role_lines(5),
     _project_lines(2),
     _trim_older_bullets,

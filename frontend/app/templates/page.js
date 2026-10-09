@@ -23,7 +23,7 @@ function Preview({ t }) {
       <div style={{ textAlign: "center", fontSize: 8, color: "#555", marginTop: 2 }}>Headline for this role</div>
       {heading("Professional Summary")}{line("100%")}{line("92%")}
       {heading("Experience")}
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, fontWeight: 700, marginTop: 4 }}><span>Title | Company</span><span style={{ fontWeight: 400 }}>2022 – Present</span></div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, fontWeight: 700, marginTop: 4 }}><span>Title | Company</span><span style={{ fontWeight: 400 }}>2022 - Present</span></div>
       {line("88%", 0.8)}{line("80%", 0.8)}
       {heading("Education")}{line("70%")}
     </div>

@@ -354,7 +354,7 @@ async def approved_facts(db: AsyncSession, user_id: str) -> list[CareerFact]:
 
 
 def merge_into_profile(facts: list[CareerFact], experiences: list[dict], projects: list[dict],
-                       skills: list[dict]) -> None:
+                       skills: list[dict], achievements: list[str] | None = None) -> None:
     """Add approved facts to the profile lists in place.
 
     Highlights join the bullets of the job they belong to (matched by company),
@@ -366,6 +366,10 @@ def merge_into_profile(facts: list[CareerFact], experiences: list[dict], project
     skill_names = {(s.get("name") or "").lower() for s in skills}
 
     for fact in facts:
+        if fact.kind == "achievement":
+            if achievements is not None and fact.text and fact.text not in achievements:
+                achievements.append(fact.text)
+            continue
         if fact.kind == "highlight":
             target = by_company.get((fact.role_company or "").strip().lower())
             if target is None:
@@ -388,7 +392,7 @@ def merge_into_profile(facts: list[CareerFact], experiences: list[dict], project
 
 
 async def enrich_profile(db: AsyncSession, user_id: str, experiences: list[dict], projects: list[dict],
-                         skills: list[dict]) -> None:
+                         skills: list[dict], achievements: list[str] | None = None) -> None:
     facts = await approved_facts(db, user_id)
     if facts:
-        merge_into_profile(facts, experiences, projects, skills)
+        merge_into_profile(facts, experiences, projects, skills, achievements)

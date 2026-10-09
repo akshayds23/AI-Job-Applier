@@ -151,7 +151,7 @@ export default function ProfilePage() {
                   <strong>{e.institution}</strong>
                   <div className="small secondary">{[e.degree, e.field].filter(Boolean).join(" in ")}{e.gpa ? ` · CGPA ${e.gpa}` : ""}</div>
                 </div>
-                <span className="tiny muted">{[e.start_date, e.end_date].filter(Boolean).join(" – ")}</span>
+                <span className="tiny muted">{[e.start_date, e.end_date].filter(Boolean).join(" - ")}</span>
               </div>
             ))}
           </Card>

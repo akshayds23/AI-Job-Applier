@@ -39,6 +39,9 @@ REQUIREMENTS
 - Paragraph 2-3: connect concrete candidate experience to their stated needs,
   drawing only on the skills and background listed above.
 - Close with a direct, confident call to action.
+- Sound like a real person writing to a real team: plain words, varied sentence length, no
+  em or en dashes, no stock phrases ("I am excited to", "leverage", "passionate", "dynamic",
+  "seamless", "synergy", "I believe I would be a great fit").
 - Never invent employers, metrics, credentials, or a different number of years of
   experience. If you mention duration at all, it must be {years}.
 - It is fine to acknowledge eagerness to learn something, but never claim to have
@@ -96,7 +99,10 @@ class CoverLetterAgent:
             logger.warning("Cover letter fell back to template: %s", exc)
             return self._template(user_name, user_profile, matched_skills, job_title, company)
 
-        return self._clean(letter, user_name)
+        from services.resume_generator import plain_text
+
+        paragraphs = self._clean(letter, user_name).split("\n\n")
+        return "\n\n".join(plain_text(part) for part in paragraphs)
 
     @staticmethod
     def _clean(letter: str, user_name: str) -> str:

@@ -289,7 +289,7 @@ export default function JobsPage() {
                         <span className="row" style={{ gap: 4 }}><Building2 size={14} /> {job.company}</span>
                         {job.location && <span className="row" style={{ gap: 4 }}><MapPin size={14} /> {job.location}{job.is_remote && !/remote/i.test(job.location) ? " · Remote" : ""}</span>}
                         {job.posted_date && <span className="row" style={{ gap: 4 }}><Calendar size={14} /> {timeAgo(job.posted_date)}</span>}
-                        {job.salary_min && <span>{job.salary_currency || ""} {job.salary_min.toLocaleString()}{job.salary_max ? `–${job.salary_max.toLocaleString()}` : ""}</span>}
+                        {job.salary_min && <span>{job.salary_currency || ""} {job.salary_min.toLocaleString()}{job.salary_max ? `-${job.salary_max.toLocaleString()}` : ""}</span>}
                       </div>
                       {item.scoring_method === "title_only" ? (
                         <AddDescription jobId={job.id} onDone={load} />

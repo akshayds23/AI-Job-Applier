@@ -43,12 +43,13 @@ async def retailor_application(db: AsyncSession, application: Application, cover
     # truthfulness check accepts them as the user's own.
     from services.career import enrich_profile
 
-    await enrich_profile(db, application.user_id, experiences, projects, skills)
+    achievements = list((profile.achievements if profile else None) or [])
+    await enrich_profile(db, application.user_id, experiences, projects, skills, achievements)
 
     user_profile = {
         "professional_summary": (profile.professional_summary if profile else "") or "",
         "headline": (profile.headline if profile else "") or "",
-        "achievements": (profile.achievements if profile else None) or [],
+        "achievements": achievements,
         "experience_years": profile.experience_years if profile else None,
     }
 

@@ -118,8 +118,8 @@ async def import_document(
 @router.post("/facts", status_code=201)
 async def add_fact(data: FactIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Typed in by the user: approved straight away."""
-    if data.kind not in {"project", "highlight", "skill"}:
-        raise HTTPException(status_code=400, detail="kind must be project, highlight or skill")
+    if data.kind not in {"project", "highlight", "skill", "achievement"}:
+        raise HTTPException(status_code=400, detail="kind must be project, highlight, skill or achievement")
     title = (data.title or data.text).strip()[:255]
     if not title:
         raise HTTPException(status_code=400, detail="Write something first")
