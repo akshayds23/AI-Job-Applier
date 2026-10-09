@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from database.database import get_db
-from database.models import User, JobListing, UserJobMatch, ScrapeRun
+from database.models import Application, User, JobListing, UserJobMatch, ScrapeRun
 from services.jobs import active_job, has_due_work, job_view, kick, run_due_jobs, start_discovery
 from utils.llm_client import NO_KEYS_MESSAGE
 from utils.llm_keys import current_keyring
@@ -19,9 +19,12 @@ async def get_matched_jobs(
     min_score: float = Query(0.0, ge=0.0, le=100.0),
     platform: Optional[str] = None,
     include_skipped: bool = False,
+    include_done: bool = False,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    """The job feed. Jobs the user is done with (applied, skipped, hidden) are left out
+    unless ``include_done``; the feed shows what still needs a decision."""
     query = (
         select(UserJobMatch, JobListing)
         .join(JobListing, UserJobMatch.job_id == JobListing.id)
@@ -40,9 +43,17 @@ async def get_matched_jobs(
     from services.job_pipeline import listing_allowed, load_filter_prefs
 
     prefs = await load_filter_prefs(db, user.id)  # settings may have changed since these were found
+    app_status = {
+        job_id: status for job_id, status in (await db.execute(
+            select(Application.job_id, Application.status).where(Application.user_id == user.id)
+        )).all()
+    }
     matches = []
     for match, job in rows:
         if not listing_allowed(job, prefs):
+            continue
+        done = match.status == "dismissed" or app_status.get(job.id) in DONE_STATUSES
+        if done and not include_done:
             continue
         matches.append({
             "match_id": match.id,
@@ -50,6 +61,7 @@ async def get_matched_jobs(
             "matched_skills": match.matched_skills,
             "gap_skills": match.gap_skills,
             "status": match.status,
+            "application_status": app_status.get(job.id),
             "scoring_method": match.scoring_method,
             "reasoning": match.reasoning,
             "matched_at": match.matched_at,
@@ -130,6 +142,57 @@ async def list_scrape_runs(
     ).scalars().all()
     job = job_view(await active_job(user.id, "discovery"))
     return [_run_to_dict(run, job if run.status == "running" else None) for run in runs]
+
+
+# Application states that mean the user has dealt with a job.
+DONE_STATUSES = {"submitted", "viewed", "interview", "offer", "rejected", "skipped"}
+
+
+async def _set_match_status(db: AsyncSession, user_id: str, job_id: str, status: str) -> None:
+    match = (await db.execute(
+        select(UserJobMatch).where(UserJobMatch.user_id == user_id, UserJobMatch.job_id == job_id)
+    )).scalars().first()
+    if match is None:
+        raise HTTPException(status_code=404, detail="Job not found in your feed")
+    match.status = status
+    await db.commit()
+
+
+@router.post("/{job_id}/hide")
+async def hide_job(job_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Not interested: drop it from the feed. It stays remembered, so searches never bring it back."""
+    await _set_match_status(db, user.id, job_id, "dismissed")
+    return {"status": "dismissed"}
+
+
+@router.post("/{job_id}/unhide")
+async def unhide_job(job_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    queued = (await db.execute(
+        select(Application.id).where(Application.user_id == user.id, Application.job_id == job_id)
+    )).first()
+    await _set_match_status(db, user.id, job_id, "queued" if queued else "new")
+    return {"status": "restored"}
+
+
+@router.post("/clear")
+async def clear_feed(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Hide every feed job the user has not acted on. Jobs in the review queue or applied to
+    are kept; hidden jobs are remembered, so new searches only bring genuinely new postings."""
+    in_progress = {
+        job_id for (job_id,) in (await db.execute(
+            select(Application.job_id).where(Application.user_id == user.id)
+        )).all()
+    }
+    rows = (await db.execute(
+        select(UserJobMatch).where(UserJobMatch.user_id == user.id, UserJobMatch.status != "dismissed")
+    )).scalars().all()
+    cleared = 0
+    for match in rows:
+        if match.job_id not in in_progress:
+            match.status = "dismissed"
+            cleared += 1
+    await db.commit()
+    return {"cleared": cleared}
 
 
 class DescriptionIn(BaseModel):

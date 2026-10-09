@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  Bookmark, Briefcase, Building2, Calendar, ExternalLink, MapPin, RotateCcw, Search, ShieldCheck, SlidersHorizontal, Trash2,
+  Bookmark, Briefcase, Building2, Calendar, ExternalLink, MapPin, RotateCcw, Search, ShieldCheck, SlidersHorizontal, Trash2, EyeOff,
 } from "lucide-react";
 import { api, startDiscovery } from "@/lib/api";
 import { Badge, Button, Card, EmptyState, Field, Loading, PageHeader, ScoreRing, timeAgo } from "@/components/ui";
 import { COMPANY_SITE_PLATFORMS, PLATFORM_LABELS, TRUST_META } from "@/lib/status";
+
+// Application states shown as a badge instead of "In review queue".
+const APPLIED_LABELS = { submitted: "Applied", viewed: "Applied", interview: "Interview", offer: "Offer", rejected: "Rejected", skipped: "Skipped" };
 
 const DEFAULT_FILTERS = {
   query: "",
@@ -19,6 +22,7 @@ const DEFAULT_FILTERS = {
   postedWithin: 0,
   seniority: "any",
   includeLow: false,
+  includeDone: false,
   sort: "match",
 };
 
@@ -105,11 +109,11 @@ export default function JobsPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.getMatchedJobs(0, filters.includeLow)
+    api.getMatchedJobs(0, filters.includeLow, filters.includeDone)
       .then(res => setItems(res || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [filters.includeLow]);
+  }, [filters.includeLow, filters.includeDone]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -166,7 +170,13 @@ export default function JobsPage() {
     <div>
       <PageHeader
         title="Job feed"
-        description="Jobs scored against your profile. Verified jobs were confirmed on the employer's own careers page."
+        description="Jobs still waiting for a decision. Applied, skipped and hidden jobs are kept out of the way, and searches never bring them back."
+        actions={<Button size="sm" icon={Trash2} onClick={async () => {
+          if (!confirm("Hide every job in the feed you have not acted on? Jobs in your review queue and ones you applied to are kept, and new searches will only add new postings.")) return;
+          const res = await api.clearFeed();
+          alert(`Cleared ${res.cleared} job(s) from the feed.`);
+          load();
+        }}>Clear feed</Button>}
       />
 
       <div className="grid" style={{ gridTemplateColumns: "280px minmax(0, 1fr)", alignItems: "start" }}>
@@ -221,6 +231,7 @@ export default function JobsPage() {
               </select>
             </Field>
             <label className="check"><input type="checkbox" checked={filters.includeLow} onChange={e => set("includeLow", e.target.checked)} /> Include low matches</label>
+            <label className="check"><input type="checkbox" checked={filters.includeDone} onChange={e => set("includeDone", e.target.checked)} /> Show applied, skipped and hidden</label>
 
             <div className="divider" style={{ margin: "4px 0" }} />
             <div className="field-label">Saved filters</div>
@@ -283,7 +294,10 @@ export default function JobsPage() {
                             {trust.label}
                           </Badge>
                         )}
-                        {item.status === "queued" && <Badge tone="primary">In review queue</Badge>}
+                        {APPLIED_LABELS[item.application_status]
+                          ? <Badge tone="success">{APPLIED_LABELS[item.application_status]}</Badge>
+                          : item.status === "dismissed" ? <Badge>Hidden</Badge>
+                          : item.status === "queued" && <Badge tone="primary">In review queue</Badge>}
                       </div>
                       <div className="row small secondary" style={{ gap: 14 }}>
                         <span className="row" style={{ gap: 4 }}><Building2 size={14} /> {job.company}</span>
@@ -314,7 +328,14 @@ export default function JobsPage() {
                         {job.verified_url && job.verified_url !== job.url && (
                           <a href={job.verified_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm"><Building2 size={14} /> Apply on company site</a>
                         )}
-                        {item.status === "queued" && <Link href="/queue" className="btn btn-primary btn-sm">Open in queue</Link>}
+                        {item.status === "queued" && !APPLIED_LABELS[item.application_status] && <Link href="/queue" className="btn btn-primary btn-sm">Open in queue</Link>}
+                        {item.status === "dismissed"
+                          ? <button className="btn btn-ghost btn-sm" onClick={async () => { await api.unhideJob(job.id); load(); }}>Unhide</button>
+                          : !APPLIED_LABELS[item.application_status] && (
+                            <button className="btn btn-ghost btn-sm" title="Not interested - remove from the feed" onClick={async () => { await api.hideJob(job.id); load(); }}>
+                              <EyeOff size={14} /> Hide
+                            </button>
+                          )}
                         <button className="btn btn-ghost btn-sm" onClick={() => setExpanded(e => ({ ...e, [item.match_id]: !open }))}>
                           {open ? "Less" : "More details"}
                         </button>
