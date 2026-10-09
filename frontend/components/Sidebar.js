@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3, Briefcase, Building2, FileText, Inbox, KeyRound, LayoutDashboard, ListChecks,
-  Settings, SquareKanban, User,
+  Layers, Settings, SquareKanban, User,
 } from "lucide-react";
 import Logo from "@/components/Logo";
 
@@ -36,6 +36,7 @@ const SECTIONS = [
     label: "Account",
     items: [
       { label: "Profile & Resume", href: "/profile", icon: User },
+      { label: "Career Profile", href: "/career", icon: Layers },
       { label: "Resume Templates", href: "/templates", icon: FileText },
       { label: "AI Keys", href: "/settings#ai-keys", icon: KeyRound },
       { label: "Settings", href: "/settings", icon: Settings },

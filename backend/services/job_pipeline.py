@@ -311,7 +311,7 @@ class JobDiscoveryPipeline:
         place_locations = [l for l in target_locations if l.lower() not in _REMOTE_WORDS]
         search_locations = ([location] if location else (place_locations[:MAX_SEARCH_LOCATIONS] or target_locations[:1])) or [""]
 
-        return {
+        context = {
             "user": user,
             "user_name": (user.name if user else "") or "Applicant",
             "profile": profile,
@@ -377,6 +377,11 @@ class JobDiscoveryPipeline:
             "llm_provider": profile.llm_provider if profile else None,
             "template": (profile.preferred_template if profile else None) or "classic",
         }
+        # Approved career-profile items (GitHub, portfolio, documents) count like resume content.
+        from services.career import enrich_profile
+
+        await enrich_profile(session, self.user_id, context["experiences"], context["projects"], context["skills"])
+        return context
 
     async def _scrape_watched_companies(self, queries: list[str], timeout: float | None = None) -> list[ScrapedJob]:
         """Open roles from the user's watched company boards that fit a target role.

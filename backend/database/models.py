@@ -471,3 +471,23 @@ class BackgroundJob(Base):
     error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CareerFact(Base):
+    """Something the user has done that their resume may not mention, from GitHub,
+    their portfolio, an uploaded document or typed in. Used for scoring and tailoring
+    only once the user approves it (company documents describe the whole team's work)."""
+    __tablename__ = "career_facts"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(20), nullable=False)            # 'project' | 'highlight' | 'skill'
+    title = Column(String(255), nullable=False)
+    text = Column(Text, nullable=True)                   # project description or the highlight statement
+    skills = Column(JSON, default=list)
+    url = Column(String(500), nullable=True)
+    role_company = Column(String(255), nullable=True)   # highlights: the job it belongs to
+    source = Column(String(20), nullable=False)          # 'github' | 'portfolio' | 'document' | 'manual'
+    source_ref = Column(String(500), nullable=True)      # repo URL, page URL or file name
+    status = Column(String(20), default="pending")       # 'pending' | 'approved' | 'rejected'
+    created_at = Column(DateTime, default=datetime.utcnow)

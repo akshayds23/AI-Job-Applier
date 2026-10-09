@@ -39,6 +39,12 @@ async def retailor_application(db: AsyncSession, application: Application, cover
         {"id": p.id, "name": p.name, "description": p.description, "technologies": p.technologies or []}
         for p in (await db.execute(select(Project).where(Project.user_id == application.user_id))).scalars()
     ]
+    # Approved career-profile items join the profile, so tailoring can use them and the
+    # truthfulness check accepts them as the user's own.
+    from services.career import enrich_profile
+
+    await enrich_profile(db, application.user_id, experiences, projects, skills)
+
     user_profile = {
         "professional_summary": (profile.professional_summary if profile else "") or "",
         "headline": (profile.headline if profile else "") or "",

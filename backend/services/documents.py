@@ -63,9 +63,14 @@ async def build_application_documents(db: AsyncSession, application: Application
         for e in (await db.execute(select(Education).where(Education.user_id == user.id))).scalars()
     ]
 
-    skills = list((await db.execute(select(Skill).where(Skill.user_id == user.id))).scalars())
-    skill_categories = {s.name: (s.category or "general") for s in skills}
-    skills_order = application.tailored_skills_order or [s.name for s in skills]
+    from services.career import enrich_profile
+
+    skill_dicts = [{"name": s.name, "category": s.category or "general"}
+                   for s in (await db.execute(select(Skill).where(Skill.user_id == user.id))).scalars()]
+    # Same enriched profile the tailor saw, so its chosen projects and lines exist here too.
+    await enrich_profile(db, user.id, experiences, projects, skill_dicts)
+    skill_categories = {s["name"]: s["category"] for s in skill_dicts}
+    skills_order = application.tailored_skills_order or [s["name"] for s in skill_dicts]
 
     output_dir = settings.generated_path / application.id
     generator = ResumeGenerator()

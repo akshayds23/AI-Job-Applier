@@ -130,6 +130,25 @@ export const api = {
   triggerLiveScrape: () => fetchApi("/jobs/scrape", { method: "POST" }),
   getScrapeRuns: (limit = 5) => fetchApi(`/jobs/runs?limit=${limit}`),
   getCompanies: () => fetchApi("/companies/"),
+  careerFacts: () => fetchApi("/career/facts"),
+  careerImportGithub: (username) => fetchApi("/career/import/github", { method: "POST", body: JSON.stringify({ username }) }),
+  careerImportUrl: (url) => fetchApi("/career/import/url", { method: "POST", body: JSON.stringify({ url }) }),
+  careerImportDocument: async (file, roleCompany) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("role_company", roleCompany || "");
+    const token = typeof window !== "undefined" ? sessionStorage.getItem("app_auth_token") : null;
+    const res = await fetch(`${API_BASE}/career/import/document`, {
+      method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || "Import failed");
+    return body;
+  },
+  careerAddFact: (fact) => fetchApi("/career/facts", { method: "POST", body: JSON.stringify(fact) }),
+  careerUpdateFact: (id, patch) => fetchApi(`/career/facts/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  careerApproveAll: () => fetchApi("/career/facts/approve-all", { method: "POST" }),
+  careerDeleteFact: (id) => fetchApi(`/career/facts/${id}`, { method: "DELETE" }),
   addJobDescription: (jobId, description) => fetchApi(`/jobs/${jobId}/description`, { method: "POST", body: JSON.stringify({ description }) }),
   addCompany: (name, careersUrl) => fetchApi("/companies/", { method: "POST", body: JSON.stringify({ name, careers_url: careersUrl }) }),
   checkCompany: (id) => fetchApi(`/companies/${id}/check`, { method: "POST" }),
