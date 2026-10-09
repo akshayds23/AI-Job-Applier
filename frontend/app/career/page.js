@@ -41,7 +41,7 @@ function ImportCard({ roles, onImported }) {
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
         <Field label="GitHub username" hint="Reads your public repositories and their READMEs.">
           <div className="row" style={{ flexWrap: "nowrap" }}>
-            <input className="input" value={github} onChange={e => setGithub(e.target.value)} placeholder="akshayds23" />
+            <input className="input" value={github} onChange={e => setGithub(e.target.value)} placeholder="your-github-username" />
             <Button icon={FolderGit2} loading={busy === "github"} disabled={!github.trim() || !!busy}
               onClick={() => run("github", () => api.careerImportGithub(github))}>Import</Button>
           </div>
@@ -105,16 +105,16 @@ function AddManually({ roles, onAdded }) {
         </Field>
         <div>
           {kind === "project" && (
-            <Field label="Project name"><input className="input" value={title} onChange={e => setTitle(e.target.value)} placeholder="TruthLens" /></Field>
+            <Field label="Project name"><input className="input" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Expense Tracker" /></Field>
           )}
           <Field label={kind === "skill" ? "Skill" : kind === "project" ? "What it does and how" : "What you did"}>
             {kind === "skill"
-              ? <input className="input" value={text} onChange={e => setText(e.target.value)} placeholder="AWS EC2" />
+              ? <input className="input" value={text} onChange={e => setText(e.target.value)} placeholder="e.g. Docker" />
               : <textarea className="textarea" rows={3} value={text} onChange={e => setText(e.target.value)}
-                  placeholder={kind === "project" ? "What it does, how it is built." : "Deployed TruthLens on AWS EC2, later moved it to Vercel for a stable domain."} />}
+                  placeholder={kind === "project" ? "What it does, how it is built." : "e.g. Deployed the app on AWS EC2, then moved it to Vercel for a stable custom domain."} />}
           </Field>
           {kind !== "skill" && (
-            <Field label="Technologies (comma separated)"><input className="input" value={skills} onChange={e => setSkills(e.target.value)} placeholder="AWS EC2, Vercel, Docker" /></Field>
+            <Field label="Technologies (comma separated)"><input className="input" value={skills} onChange={e => setSkills(e.target.value)} placeholder="e.g. Python, PostgreSQL, Docker" /></Field>
           )}
           {kind === "highlight" && roles.length > 0 && (
             <Field label="Job">

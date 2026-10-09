@@ -185,18 +185,77 @@ async def current_role_company(db: AsyncSession, user_id: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+_BROWSER_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AutoApplier", "Accept": "text/html"}
+
+
+async def list_github_repos(username: str) -> list[dict] | None:
+    """Public, non-fork repositories: {name, html_url, description, language}.
+
+    GitHub's API allows 60 anonymous calls an hour per server address, and hosting
+    addresses are shared, so it is often exhausted. Fallbacks: the repositories tab,
+    then the profile page's pinned repositories. Set GITHUB_TOKEN on the server to
+    raise the API limit to 5,000 an hour.
+    """
+    import os
+
+    from bs4 import BeautifulSoup
+
+    headers = {"Accept": "application/vnd.github+json"}
+    if os.environ.get("GITHUB_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
+    api = await request_with_retry(
+        "GET", f"https://api.github.com/users/{username}/repos?per_page=100&sort=pushed", headers=headers, max_retries=1,
+    )
+    if api is not None and api.status_code == 200:
+        return [
+            {"name": r["name"], "html_url": r["html_url"], "description": r.get("description") or "",
+             "language": r.get("language") or ""}
+            for r in api.json() if not r.get("fork") and not r.get("archived")
+        ]
+    if api is not None and api.status_code == 404:
+        return None
+
+    base = f"https://github.com/{username}"
+    page = await request_with_retry("GET", f"{base}?tab=repositories&type=source", headers=_BROWSER_HEADERS, max_retries=1)
+    if page is not None and page.status_code == 200:
+        soup = BeautifulSoup(page.text, "html.parser")
+        repos = []
+        for link in soup.select('a[itemprop~="codeRepository"]'):
+            item = link.find_parent("li") or link.parent
+            desc = item.select_one('[itemprop="description"]') if item else None
+            lang = item.select_one('[itemprop="programmingLanguage"]') if item else None
+            name = link.get_text(strip=True)
+            repos.append({"name": name, "html_url": f"{base}/{name}",
+                          "description": desc.get_text(" ", strip=True) if desc else "",
+                          "language": lang.get_text(strip=True) if lang else ""})
+        if repos:
+            return repos
+
+    profile = await request_with_retry("GET", base, headers=_BROWSER_HEADERS, max_retries=1)
+    if profile is None or profile.status_code != 200:
+        return None
+    soup = BeautifulSoup(profile.text, "html.parser")
+    repos = []
+    for item in soup.select(".pinned-item-list-item"):
+        name_el = item.select_one("span.repo")
+        if not name_el:
+            continue
+        name = name_el.get_text(strip=True)
+        desc = item.select_one("p.pinned-item-desc")
+        lang = item.select_one('[itemprop="programmingLanguage"]')
+        repos.append({"name": name, "html_url": f"{base}/{name}",
+                      "description": desc.get_text(" ", strip=True) if desc else "",
+                      "language": lang.get_text(strip=True) if lang else ""})
+    return repos
+
+
 async def import_github(db: AsyncSession, user_id: str, username: str, llm) -> dict[str, Any]:
     username = username.strip().strip("/").split("/")[-1]
     if not re.fullmatch(r"[A-Za-z0-9-]{1,39}", username):
-        raise ValueError("Enter a GitHub username, e.g. akshayds23")
-    response = await request_with_retry(
-        "GET", f"https://api.github.com/users/{username}/repos?per_page=100&sort=pushed",
-        headers={"Accept": "application/vnd.github+json"}, max_retries=1,
-    )
-    if response is None or response.status_code != 200:
-        raise ValueError(f"Could not read GitHub user '{username}'"
-                         + (" (GitHub rate limit - try again in an hour)" if response is not None and response.status_code == 403 else ""))
-    repos = [r for r in response.json() if not r.get("fork") and not r.get("archived")]
+        raise ValueError("Enter a GitHub username (the name in github.com/<username>)")
+    repos = await list_github_repos(username)
+    if repos is None:
+        raise ValueError(f"Could not find public repositories for GitHub user '{username}'")
     repos = [r for r in repos if r.get("name", "").lower() != username.lower()][:GITHUB_REPOS]
 
     known = await _known(db, user_id)
