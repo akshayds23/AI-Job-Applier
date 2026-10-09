@@ -127,8 +127,8 @@ _CATEGORY_TITLES = {
 }
 
 MAX_ROLES_DETAILED = 4
-MAX_BULLETS_PER_ROLE = 5
-MAX_PROJECTS = 3
+MAX_BULLETS_PER_ROLE = 6
+MAX_PROJECTS = 5  # the fill-the-page ladder trims down to what fits
 MAX_EDUCATION = 3
 
 
@@ -210,9 +210,10 @@ class ResumeGenerator:
             certifications=certifications or [],
         )
 
-        # The built-in fitter trims content in place; LaTeX does its own fitting.
+        # The built-in fitter picks how much content fills one page; LaTeX starts from
+        # that choice (and tries the next fuller step first) and fine-tunes spacing itself.
+        pdf, body_size, fuller = self._fit_pdf(content, style)
         latex_content = copy.deepcopy(content)
-        pdf, body_size = self._fit_pdf(content, style)
 
         safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", str(job_id))[:60]
         docx_path = output_path / f"resume_{safe_id}.docx"
@@ -222,6 +223,8 @@ class ResumeGenerator:
         pdf.output(str(pdf_path))
         self._render_docx(content, style, docx_path, body_size)
         variants = latex_variants(latex_content)
+        if fuller is not None:
+            variants = [render_tex(fuller, 0)] + variants  # LaTeX packs tighter: try one step fuller
         tex_path.write_text(variants[0], encoding="utf-8")
 
         logger.info("Generated resume %s (%s, %.1fpt, %d page(s))", pdf_path.name, style.name, body_size, pdf.page_no())
@@ -377,7 +380,7 @@ class ResumeGenerator:
             sentences = re.split(r"(?<=[.!?])\s+", clean_text(project.get("description") or ""))
             formatted_projects.append({
                 "name": " | ".join(p for p in (str(project["name"]).strip(), ", ".join(tech)) if p),
-                "bullets": [_clean_bullet(trim_to_sentence(s, 200)) for s in sentences if len(s) > 15][:3],
+                "bullets": [_clean_bullet(trim_to_sentence(s, 200)) for s in sentences if len(s) > 15][:4],
             })
         if sum(1 for p in formatted_projects if p["bullets"]) >= 2:
             # A bare repo name says nothing to a recruiter once real projects are listed.
@@ -454,29 +457,53 @@ class ResumeGenerator:
 
     # -- PDF -----------------------------------------------------------------
 
-    def _fit_pdf(self, content: ResumeContent, style: TemplateStyle) -> tuple[FPDF, float]:
-        """Largest font size that fits one page; trim gently, then allow a second page."""
+    def _fit_pdf(self, content: ResumeContent, style: TemplateStyle) -> tuple[FPDF, float, ResumeContent | None]:
+        """Fill exactly one page.
+
+        Content starts generous (more projects and lines than fit) and the least
+        important parts are removed one step at a time; at each step the largest
+        comfortable font is tried. The first step that fits one page wins, so the
+        page is as full as the user's real content allows. Returns the PDF, the
+        font size and the previous (fuller) step, which the LaTeX build tries first.
+        """
+        previous: ResumeContent | None = None
+        for index, step in enumerate(_FILL_STEPS):
+            step(content)
+            for size in _COMFORT_SIZES:
+                pdf = self._render_pdf(content, style, size)
+                if pdf.page_no() == 1:
+                    if index == 0 and size == _COMFORT_SIZES[0]:
+                        pdf = self._spread_to_fill(content, style, size, pdf)
+                    return pdf, size, previous
+            previous = copy.deepcopy(content)
+
+        # Leanest content still too long: smaller type before a second page.
         for size in _BODY_SIZES:
+            if size in _COMFORT_SIZES:
+                continue
             pdf = self._render_pdf(content, style, size)
             if pdf.page_no() == 1:
-                return pdf, size
-
-        # Still too long at the smallest size: trim the least important content.
-        for trim in (_trim_untailored, _trim_older_bullets, _trim_extras, _trim_bullets_to_three):
-            trim(content)
-            pdf = self._render_pdf(content, style, _BODY_SIZES[-1])
-            if pdf.page_no() == 1:
-                return pdf, _BODY_SIZES[-1]
+                return pdf, size, previous
         # A long senior career may need two pages - better than cutting real roles.
-        return self._render_pdf(content, style, _BODY_SIZES[2]), _BODY_SIZES[2]
+        return self._render_pdf(content, style, _BODY_SIZES[2]), _BODY_SIZES[2], previous
 
-    def _render_pdf(self, content: ResumeContent, style: TemplateStyle, size: float) -> FPDF:
+    def _spread_to_fill(self, content: ResumeContent, style: TemplateStyle, size: float, pdf: FPDF) -> FPDF:
+        """Everything fits with room to spare: open up the spacing (roomiest that still fits)."""
+        if pdf.get_y() >= pdf.page_break_trigger * 0.9:
+            return pdf
+        for spread in (1.6, 1.45, 1.3, 1.18, 1.08):
+            roomier = self._render_pdf(content, style, size, spread)
+            if roomier.page_no() == 1:
+                return roomier
+        return pdf
+
+    def _render_pdf(self, content: ResumeContent, style: TemplateStyle, size: float, spread: float = 1.0) -> FPDF:
         pdf = FPDF(format="A4", unit="mm")
         pdf.set_margins(MARGIN_MM, MARGIN_MM, MARGIN_MM)
         pdf.set_auto_page_break(auto=True, margin=MARGIN_MM)
         pdf.add_page()
         family, unicode_ok = _register_fonts(pdf, style.font_family)
-        writer = _PdfWriter(pdf, family, unicode_ok, style, size)
+        writer = _PdfWriter(pdf, family, unicode_ok, style, size, spread)
         writer.render(content)
         return pdf
 
@@ -594,12 +621,14 @@ class ResumeGenerator:
 class _PdfWriter:
     """Draws one resume onto an FPDF page in the LaTeX-template style."""
 
-    def __init__(self, pdf: FPDF, family: str, unicode_ok: bool, style: TemplateStyle, size: float) -> None:
+    def __init__(self, pdf: FPDF, family: str, unicode_ok: bool, style: TemplateStyle, size: float,
+                 spread: float = 1.0) -> None:
         self.pdf = pdf
         self.family = family
         self.style = style
         self.size = size
-        self.line = size * PT_TO_MM * 1.28
+        self.spread = spread  # >1 opens up line and section spacing to fill a short page
+        self.line = size * PT_TO_MM * 1.28 * (1 + (spread - 1) * 0.5)
         self.text = (lambda s: s) if unicode_ok else _ascii
         self.bullet_glyph = "•" if unicode_ok else "-"
         self.width = pdf.w - pdf.l_margin - pdf.r_margin
@@ -688,7 +717,7 @@ class _PdfWriter:
 
     def heading(self, title: str) -> None:
         pdf = self.pdf
-        pdf.ln(2.6)
+        pdf.ln(2.6 * self.spread)
         self.font("B", 2)
         pdf.set_text_color(*self.style.accent)
         pdf.cell(0, (self.size + 2) * PT_TO_MM * 1.25, self.text(title), new_x="LMARGIN", new_y="NEXT")
@@ -697,13 +726,13 @@ class _PdfWriter:
             pdf.set_draw_color(*self.style.accent)
             pdf.set_line_width(0.3)
             pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
-        pdf.ln(1.4)
+        pdf.ln(1.4 * self.spread)
         pdf.set_text_color(15, 15, 15)
 
     def row(self, left: str, right: str, bold: bool = True, gap: float = 1.2) -> None:
         """Left text (bold) with right-aligned text on the same baseline, LaTeX \\hfill style."""
         pdf = self.pdf
-        pdf.ln(gap)
+        pdf.ln(gap * self.spread)
         if pdf.get_y() + self.line > pdf.page_break_trigger:
             pdf.add_page()
         self.font()
@@ -757,6 +786,10 @@ _TEX_PREAMBLE = r"""\documentclass[10pt,a4paper]{article}
 # Progressively tighter spacing, tried in order until the resume fits one page.
 # Level 0 is the template exactly as designed.
 _TEX_DENSITY = [
+    # Spacious first: when the content is shorter than a page, the roomiest layout that
+    # still fits one page is chosen, so the page looks full instead of ending early.
+    "\n\\setlength{\\parskip}{2.5pt}\n\\titlespacing*{\\section}{0pt}{14pt}{6pt}\n\\setlist[itemize]{leftmargin=*,itemsep=1pt,topsep=1pt}\n\\linespread{1.14}\n",
+    "\n\\setlength{\\parskip}{2pt}\n\\titlespacing*{\\section}{0pt}{11pt}{5pt}\n\\setlist[itemize]{leftmargin=*,itemsep=0.5pt,topsep=0.5pt}\n\\linespread{1.07}\n",
     "",
     "\n\\setlength{\\parskip}{3pt}\n\\titlespacing*{\\section}{0pt}{8pt}{4pt}\n",
     "\n\\setlength{\\parskip}{2pt}\n\\titlespacing*{\\section}{0pt}{6pt}{3pt}\n\\linespread{0.96}\n",
@@ -856,6 +889,28 @@ def render_tex(c: ResumeContent, density: int = 0) -> str:
 # ---------------------------------------------------------------------------
 # Fitting helpers
 # ---------------------------------------------------------------------------
+
+
+def _keep_projects(n: int):
+    def step(content: ResumeContent) -> None:
+        content.projects = content.projects[:n]
+    return step
+
+
+def _project_lines(n: int):
+    def step(content: ResumeContent) -> None:
+        for project in content.projects:
+            project["bullets"] = project["bullets"][:n]
+    return step
+
+
+def _first_role_lines(n: int):
+    def step(content: ResumeContent) -> None:
+        for exp in content.experiences:
+            if exp["bullets"]:
+                exp["bullets"] = exp["bullets"][:n]
+                break
+    return step
 
 
 def _trim_untailored(content: ResumeContent) -> None:
@@ -1048,3 +1103,22 @@ def list_templates() -> list[dict[str, str]]:
         }
         for style in TEMPLATES.values()
     ]
+
+
+# Fill-the-page ladder, applied cumulatively from the fullest resume to the leanest:
+# least important content first (extra projects, extra project lines, untailored
+# roles, older roles' detail), the main role's own lines last.
+_FILL_STEPS = (
+    lambda content: None,
+    _keep_projects(4),
+    _project_lines(3),
+    _keep_projects(3),
+    _trim_untailored,
+    _first_role_lines(5),
+    _project_lines(2),
+    _trim_older_bullets,
+    _trim_extras,
+    _trim_bullets_to_three,
+)
+# Sizes tried at every step before removing more content (smaller ones only at the end).
+_COMFORT_SIZES = (10.5, 10.2, 10.0, 9.7)
