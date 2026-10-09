@@ -111,7 +111,7 @@ function AddManually({ roles, onAdded }) {
             {kind === "skill"
               ? <input className="input" value={text} onChange={e => setText(e.target.value)} placeholder="e.g. Docker" />
               : <textarea className="textarea" rows={3} value={text} onChange={e => setText(e.target.value)}
-                  placeholder={kind === "project" ? "What it does, how it is built." : "e.g. Deployed the app on AWS EC2, then moved it to Vercel for a stable custom domain."} />}
+                  placeholder={kind === "project" ? "What it does, how it is built." : "e.g. Set up automated nightly database backups with alerts when a backup fails."} />}
           </Field>
           {kind !== "skill" && (
             <Field label="Technologies (comma separated)"><input className="input" value={skills} onChange={e => setSkills(e.target.value)} placeholder="e.g. Python, PostgreSQL, Docker" /></Field>
