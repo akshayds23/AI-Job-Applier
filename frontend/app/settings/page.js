@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  CheckCircle2, Clock, FileText, KeyRound, Mail, Plus, Power, RefreshCw, Search, Trash2, XCircle,
+  CheckCircle2, Clock, FileText, KeyRound, Mail, Plus, Power, RefreshCw, Search, Trash2, UserX, XCircle,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { api, pumpJobs } from "@/lib/api";
 import { Badge, Button, Card, Field, Notice, PageHeader } from "@/components/ui";
 import TitleSuggestions from "@/components/TitleSuggestions";
@@ -421,6 +422,64 @@ function EmailCard() {
   );
 }
 
+function DeleteAccountCard() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const remove = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteAccount(password);
+      sessionStorage.removeItem("app_auth_token");
+      sessionStorage.removeItem("app_user_data");
+      router.push("/login?deleted=1");
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Delete account" icon={UserX} style={{ marginBottom: 20 }}>
+      <p className="small secondary" style={{ marginBottom: 14 }}>
+        Permanently deletes your account and everything stored for it: profile, resumes, career profile, AI keys,
+        watched companies, job matches, applications, generated documents and the connected email account.
+        This cannot be undone.
+      </p>
+      {!open ? (
+        <Button variant="danger" icon={Trash2} onClick={() => setOpen(true)}>Delete my account</Button>
+      ) : (
+        <form onSubmit={remove} className="stack" style={{ gap: 12 }}>
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Your password">
+              <input id="delete-password" className="input" type="password" required autoComplete="current-password"
+                     value={password} onChange={e => setPassword(e.target.value)} />
+            </Field>
+            <Field label="Type DELETE to confirm">
+              <input id="delete-confirm" className="input" required value={typed} onChange={e => setTyped(e.target.value)} placeholder="DELETE" />
+            </Field>
+          </div>
+          {error && <Notice tone="danger">{error}</Notice>}
+          <div className="row" style={{ gap: 8 }}>
+            <Button variant="danger" type="submit" loading={busy} disabled={typed !== "DELETE" || !password}>
+              Permanently delete account
+            </Button>
+            <Button variant="ghost" type="button" disabled={busy} onClick={() => { setOpen(false); setPassword(""); setTyped(""); setError(null); }}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   useEffect(() => {
     if (window.location.hash === "#ai-keys") {
@@ -435,6 +494,7 @@ export default function SettingsPage() {
       <SearchCard />
       <ResumeCard />
       <EmailCard />
+      <DeleteAccountCard />
     </div>
   );
 }

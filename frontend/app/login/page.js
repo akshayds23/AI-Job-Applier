@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BadgeCheck, FileText, Inbox } from "lucide-react";
 import Logo from "@/components/Logo";
@@ -21,6 +21,11 @@ export default function LoginPage() {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [deleted, setDeleted] = useState(false);
+
+  useEffect(() => {
+    setDeleted(new URLSearchParams(window.location.search).get("deleted") === "1");
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -89,6 +94,7 @@ export default function LoginPage() {
               <input className="input" type="password" required value={password} onChange={e => setPassword(e.target.value)}
                 autoComplete={isRegister ? "new-password" : "current-password"} />
             </Field>
+            {deleted && !error && <Notice tone="success">Your account and all its data have been deleted.</Notice>}
             {error && <Notice tone="danger">{error}</Notice>}
             <Button variant="primary" type="submit" loading={loading} style={{ width: "100%", height: 40 }}>
               {isRegister ? "Create account" : "Sign in"}

@@ -105,6 +105,25 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     return _token_response(user)
 
 
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+
+@router.post("/delete-account")
+async def delete_account(
+    data: DeleteAccountRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete the signed-in user's account and all their data. Needs the password."""
+    from services.account import delete_account as remove_everything
+
+    if not user.password_hash or not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=403, detail="Wrong password. Your account was not deleted.")
+    await remove_everything(db, user)
+    return {"status": "deleted"}
+
+
 @router.get("/me")
 async def read_current_user(current_user: User = Depends(get_current_user)):
     return {

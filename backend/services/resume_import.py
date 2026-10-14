@@ -65,6 +65,7 @@ async def apply_parsed_resume(db: AsyncSession, user: User, parsed: dict[str, An
         profile.achievements = parsed.get("achievements") or []
         profile.certifications = parsed.get("certifications") or []
     profile.title_suggestions = None  # recomputed from the new work history
+    profile.company_suggestions = None
     profile.is_onboarded = True
 
     # Skills are unique per user; "REST APIs" and "REST API" are the same skill.

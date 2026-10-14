@@ -154,6 +154,50 @@ async def title_suggestions(
     return result
 
 
+@router.get("/company-suggestions")
+async def company_suggestions(
+    refresh: bool = False,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Companies to watch for the user's own roles and places, each checked against its real careers board.
+
+    One AI call plus board checks (up to about a minute). Cached on the profile; refresh=true
+    regenerates. Changing target roles, places or the resume clears the cache.
+    """
+    from database.models import Company
+    from services.company_suggester import suggest_companies
+
+    profile = (await db.execute(select(UserProfile).where(UserProfile.user_id == user.id))).scalar_one_or_none()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if profile.company_suggestions and not refresh:
+        return profile.company_suggestions
+
+    watching = [name for (name,) in (await db.execute(select(Company.name).where(Company.user_id == user.id))).all()]
+    history = [
+        f"{e.title} at {e.company}"
+        for e in (await db.execute(
+            select(Experience).where(Experience.user_id == user.id).order_by(Experience.display_order).limit(4)
+        )).scalars()
+    ]
+    skills = [s.name for s in (await db.execute(select(Skill).where(Skill.user_id == user.id))).scalars()]
+    result = await suggest_companies(
+        roles=[r for r in (profile.target_roles or []) if r and r.strip()],
+        places=[p for p in (profile.target_locations or []) if p and p.strip()],
+        remote_preference=profile.remote_preference or "any",
+        headline=profile.headline,
+        skills=skills,
+        history=history,
+        watching=watching,
+        excluded=list(profile.excluded_companies or []),
+    )
+    if result["source"] == "ai":  # don't cache "add a key first" notes
+        profile.company_suggestions = result
+        await db.commit()
+    return result
+
+
 @router.put("/")
 async def update_profile(
     data: ProfileUpdate,
@@ -169,6 +213,11 @@ async def update_profile(
     update_dict = data.model_dump(exclude_unset=True)
     if "name" in update_dict and update_dict["name"]:
         user.name = update_dict.pop("name")
+
+    # Company suggestions depend on the roles and places searched for.
+    if any(field in update_dict and update_dict[field] != getattr(profile, field)
+           for field in ("target_roles", "target_locations", "remote_preference")):
+        profile.company_suggestions = None
 
     for field, value in update_dict.items():
         setattr(profile, field, value)

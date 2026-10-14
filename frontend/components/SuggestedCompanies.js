@@ -1,94 +1,110 @@
 "use client";
 
-import { useState } from "react";
-import { Lightbulb, Plus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Lightbulb, Plus, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, Notice } from "@/components/ui";
 
-// Companies whose career pages AutoApplier can read directly (Greenhouse / Lever / Ashby),
-// checked in October 2026 to have open AI/ML roles in India or remote. Review periodically.
-const GROUPS = [
-  {
-    title: "AI teams hiring in India",
-    companies: [
-      ["Sarvam AI", "https://jobs.ashbyhq.com/sarvam"],
-      ["Meesho", "https://jobs.lever.co/meesho"],
-      ["InMobi", "https://job-boards.greenhouse.io/inmobi"],
-      ["Observe.AI", "https://job-boards.greenhouse.io/observeai"],
-      ["HackerRank", "https://job-boards.greenhouse.io/hackerrank"],
-      ["Mindtickle", "https://jobs.lever.co/mindtickle"],
-      ["Paytm", "https://jobs.lever.co/paytm"],
-      ["Zeta", "https://jobs.lever.co/zeta"],
-      ["Groww", "https://job-boards.greenhouse.io/groww"],
-      ["CRED", "https://jobs.lever.co/cred"],
-      ["Atlan", "https://jobs.ashbyhq.com/atlan"],
-      ["Druva", "https://job-boards.greenhouse.io/druva"],
-    ],
-  },
-  {
-    title: "Global AI companies with remote roles",
-    companies: [
-      ["Supabase", "https://jobs.ashbyhq.com/supabase"],
-      ["PostHog", "https://jobs.ashbyhq.com/posthog"],
-      ["Replit", "https://jobs.ashbyhq.com/replit"],
-      ["LangChain", "https://jobs.ashbyhq.com/langchain"],
-      ["Anyscale", "https://jobs.ashbyhq.com/anyscale"],
-      ["Cohere", "https://jobs.ashbyhq.com/cohere"],
-      ["Elastic", "https://job-boards.greenhouse.io/elastic"],
-      ["MongoDB", "https://job-boards.greenhouse.io/mongodb"],
-    ],
-  },
-];
-
+/**
+ * Companies suggested for the user's own roles and places. The backend asks the AI for
+ * employers in the user's field, then keeps only those whose careers board AutoApplier
+ * can read, with how many open roles match right now. Cached until roles, places or the
+ * resume change; "Suggest again" regenerates (one AI call).
+ */
 export default function SuggestedCompanies({ watched, onAdded }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
   const [failed, setFailed] = useState({});
+
+  const load = async (refresh = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await api.getCompanySuggestions(refresh));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(false); }, []);
+
   const watchedNames = new Set((watched || []).map(c => (c.name || "").toLowerCase()));
+  const remaining = (data?.suggestions || []).filter(c => !watchedNames.has(c.name.toLowerCase()));
 
   const add = async (list) => {
-    for (const [name, url] of list) {
-      if (watchedNames.has(name.toLowerCase())) continue;
-      setBusy(name);
+    for (const company of list) {
+      setBusy(company.name);
       try {
-        await api.addCompany(name, url);
+        await api.addCompany(company.name, company.careers_url);
       } catch (e) {
-        setFailed(f => ({ ...f, [name]: e.message }));
+        setFailed(f => ({ ...f, [company.name]: e.message }));
       }
     }
     setBusy(null);
     onAdded?.();
   };
 
-  const groups = GROUPS.map(g => ({ ...g, remaining: g.companies.filter(([n]) => !watchedNames.has(n.toLowerCase())) }))
-    .filter(g => g.remaining.length);
-  if (!groups.length) return null;
+  const actions = (
+    <Button size="sm" variant="ghost" icon={RefreshCw} loading={loading} disabled={!!busy} onClick={() => load(true)}
+            title="Ask the AI again and re-check the careers pages (one API call)">
+      Suggest again
+    </Button>
+  );
 
   return (
-    <Card title="Suggested companies" icon={Lightbulb} style={{ marginBottom: 20 }}>
+    <Card title="Suggested companies" icon={Lightbulb} actions={actions} style={{ marginBottom: 20 }}>
       <p className="small muted" style={{ marginBottom: 12 }}>
-        Companies whose career pages AutoApplier can read directly and that recently had AI / ML roles open.
+        Picked for your target roles and locations. Every company here has a careers page AutoApplier can read,
+        and the count shows roles that match your titles right now.
       </p>
-      {groups.map(group => (
-        <div key={group.title} style={{ marginBottom: 14 }}>
-          <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-            <strong className="small">{group.title}</strong>
-            <Button size="sm" icon={Plus} loading={busy && group.remaining.some(([n]) => n === busy)}
-                    disabled={!!busy} onClick={() => add(group.remaining)}>
-              Watch all {group.remaining.length}
+
+      {error && <Notice tone="danger">{error}</Notice>}
+      {!data && !error && (
+        <div className="small muted">
+          {loading ? "Finding companies that hire for your roles and checking their careers pages. This can take up to a minute." : null}
+        </div>
+      )}
+      {data?.note && <Notice tone="info">{data.note}</Notice>}
+      {data && !data.note && remaining.length === 0 && (
+        <div className="small muted">You are already watching every suggested company. Use “Suggest again” for more.</div>
+      )}
+
+      {remaining.length > 0 && (
+        <>
+          <div className="row" style={{ justifyContent: "flex-end", marginBottom: 8 }}>
+            <Button size="sm" icon={Plus} loading={!!busy} disabled={!!busy || loading} onClick={() => add(remaining)}>
+              Watch all {remaining.length}
             </Button>
           </div>
-          <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-            {group.remaining.map(([name, url]) => (
-              <Button key={name} size="sm" variant="ghost" icon={failed[name] ? undefined : busy === name ? undefined : Plus}
-                      loading={busy === name} disabled={!!busy} title={failed[name] || url}
-                      onClick={() => add([[name, url]])}>
-                {name}{failed[name] ? " (not found)" : ""}
-              </Button>
+          <div className="stack" style={{ gap: 6 }}>
+            {remaining.map(company => (
+              <div key={`${company.ats}:${company.slug}`} className="row" style={{ gap: 10, alignItems: "flex-start" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong className="small">{company.name}</strong>{" "}
+                  <span className="tiny muted">
+                    {company.matching_roles > 0
+                      ? `${company.matching_roles} matching ${company.matching_roles === 1 ? "role" : "roles"} open`
+                      : `${company.open_roles} open roles, none matching yet`}
+                  </span>
+                  {company.why && <div className="tiny secondary">{company.why}</div>}
+                  {company.sample_titles?.length > 0 && (
+                    <div className="tiny muted" title={company.sample_titles.join("\n")}>e.g. {company.sample_titles.join(" · ")}</div>
+                  )}
+                  {failed[company.name] && <div className="tiny" style={{ color: "var(--danger-text)" }}>{failed[company.name]}</div>}
+                </div>
+                <Button size="sm" variant="ghost" icon={busy === company.name ? undefined : Plus}
+                        loading={busy === company.name} disabled={!!busy} onClick={() => add([company])}>
+                  Watch
+                </Button>
+              </div>
             ))}
           </div>
-        </div>
-      ))}
+        </>
+      )}
     </Card>
   );
 }
-

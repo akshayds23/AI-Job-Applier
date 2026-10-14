@@ -946,10 +946,30 @@ def remote_open_to(location: str | None, home_words: tuple[str, ...]) -> bool:
     return any(word in text for word in _OPEN_REMOTE_WORDS + home_words)
 
 
+# Cities posted under more than one name ("Bangalore" vs "Bengaluru").
+_PLACE_ALIASES = [
+    ("bangalore", "bengaluru"), ("gurgaon", "gurugram"), ("bombay", "mumbai"), ("madras", "chennai"),
+    ("calcutta", "kolkata"), ("new delhi", "delhi"), ("trivandrum", "thiruvananthapuram"),
+]
+
+
+def expand_place_aliases(places: list[str]) -> list[str]:
+    out = list(places)
+    for place in places:
+        city = place.split(",")[0].strip()
+        for a, b in _PLACE_ALIASES:
+            if city == a and b not in out:
+                out.append(b)
+            elif city == b and a not in out:
+                out.append(a)
+    return out
+
+
 def location_allowed(location: str | None, is_remote: bool, places: list[str], preference: str,
                      home_words: tuple[str, ...] = ("india",)) -> bool:
     """Job location against the user's places and remote preference (shared by search, feed and queue)."""
     here = (location or "").lower()
+    places = expand_place_aliases(places)
     in_place = any(place.split(",")[0].strip() in here for place in places) if places else True
     remote_ok = is_remote and remote_open_to(location, home_words + tuple(p.split(",")[0].strip() for p in places))
     if preference == "remote":

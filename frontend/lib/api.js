@@ -176,6 +176,8 @@ export const api = {
   sendEmail: (id, data) => fetchApi(`/email/applications/${id}/send`, { method: "POST", body: JSON.stringify(data) }),
   getEmailHistory: (id) => fetchApi(`/email/applications/${id}/history`),
   getTitleSuggestions: (refresh = false) => fetchApi(`/profile/title-suggestions?refresh=${refresh}`),
+  getCompanySuggestions: (refresh = false) => fetchApi(`/profile/company-suggestions?refresh=${refresh}`),
+  deleteAccount: (password) => fetchApi("/auth/delete-account", { method: "POST", body: JSON.stringify({ password }) }),
   getAiKeys: () => fetchApi("/ai-keys/"),
   addAiKey: (data) => fetchApi("/ai-keys/", { method: "POST", body: JSON.stringify(data) }),
   updateAiKey: (id, data) => fetchApi(`/ai-keys/${id}`, { method: "PATCH", body: JSON.stringify(data) }),

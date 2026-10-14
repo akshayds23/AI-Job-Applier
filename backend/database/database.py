@@ -123,6 +123,7 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("user_profiles", "remote_preference", "VARCHAR(10) DEFAULT 'any'"),
     ("user_profiles", "max_job_age_days", "INTEGER DEFAULT 30"),
     ("user_profiles", "title_suggestions", "JSON"),
+    ("user_profiles", "company_suggestions", "JSON"),
     ("ai_keys", "cooldown_until", "TIMESTAMP"),
     ("ai_keys", "cooldown_reason", "VARCHAR(60)"),
     ("ai_keys", "calls", "INTEGER DEFAULT 0"),

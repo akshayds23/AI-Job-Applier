@@ -76,6 +76,7 @@ class UserProfile(Base):
     llm_max_wait_minutes = Column(Integer, default=15)
     remote_preference = Column(String(10), default="any")  # any | remote | onsite (on-site or hybrid)
     max_job_age_days = Column(Integer, default=30)          # ignore postings older than this
+    company_suggestions = Column(JSON, nullable=True)       # cached, board-checked {"suggestions": [...], "generated_at": ...}
     title_suggestions = Column(JSON, nullable=True)         # cached {"suggestions": [...], "generated_at": ...}    # wait this long for rate limits before falling back
     is_onboarded = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
